@@ -3,19 +3,18 @@ require_once 'config.php';
 header('Content-Type: application/json');
 
 if (!isset($_SESSION['user_id'])) {
-    echo json_encode(['error' => 'Unauthorized']);
+    echo json_encode(['error' => 'Unauthorized', 'notifications' => [], 'total_pages' => 0]);
     exit();
 }
 
 $db = new Database();
 $conn = $db->getConnection();
-
 $user_id = $_SESSION['user_id'];
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $per_page = 5;
 $offset = ($page - 1) * $per_page;
 
-$stmt = $conn->prepare("SELECT COUNT(*) as total FROM notifications WHERE user_id = ?");
+$stmt = $conn->prepare("SELECT COUNT(*) as total FROM vw_user_notifications WHERE user_id = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $total_result = $stmt->get_result();
@@ -25,9 +24,8 @@ $total_pages = ceil($total_notifications / $per_page);
 $stmt->close();
 
 $stmt = $conn->prepare("
-    SELECT * FROM notifications 
+    SELECT * FROM vw_user_notifications 
     WHERE user_id = ? 
-    ORDER BY created_at DESC 
     LIMIT ? OFFSET ?
 ");
 $stmt->bind_param("iii", $user_id, $per_page, $offset);

@@ -15,57 +15,97 @@ $conn = $db->getConnection();
 
 $error = '';
 $success = '';
-$available_rooms = null;
 
 $result = $conn->query("CALL sp_get_room_types()");
 $room_types = $result->fetch_all(MYSQLI_ASSOC);
 $result->close();
 $conn->next_result();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['search'])) {
-        $check_in = $_POST['check_in'];
-        $check_out = $_POST['check_out'];
-        $room_type_id = !empty($_POST['room_type_id']) ? $_POST['room_type_id'] : null;
-        
-        if (strtotime($check_in) < strtotime(date('Y-m-d'))) {
-            $error = 'Check-in date cannot be in the past';
-        } elseif (strtotime($check_out) <= strtotime($check_in)) {
-            $error = 'Check-out date must be after check-in date';
-        } else {
-            $stmt = $conn->prepare("CALL sp_get_available_rooms(?, ?, ?)");
-            $stmt->bind_param("ssi", $check_in, $check_out, $room_type_id);
-            $stmt->execute();
-            $available_rooms = $stmt->get_result();
-            $stmt->close();
-            $conn->next_result();
-            
-            $_SESSION['search_check_in'] = $check_in;
-            $_SESSION['search_check_out'] = $check_out;
-        }
-    } elseif (isset($_POST['book'])) {
-        $room_id = $_POST['room_id'];
-        $check_in = $_SESSION['search_check_in'];
-        $check_out = $_SESSION['search_check_out'];
-        $special_requests = $_POST['special_requests'];
-        
-        $stmt = $conn->prepare("CALL sp_create_reservation(?, ?, ?, ?, ?)");
-        $stmt->bind_param("iisss", $_SESSION['user_id'], $room_id, $check_in, $check_out, $special_requests);
-        
-        if ($stmt->execute()) {
-            $result = $stmt->get_result();
-            if ($result && $row = $result->fetch_assoc()) {
-                $reservation_id = $row['reservation_id'];
-                header('Location: payment.php?id=' . $reservation_id);
-                exit();
-            }
-        } else {
-            $error = 'This date is already booked, Please select other dates.';
-        }
-        
+$room_type_filter = !empty($_GET['room_type_id']) ? $_GET['room_type_id'] : null;
+
+$stmt = $conn->prepare("CALL sp_get_all_rooms_with_availability(?)");
+$stmt->bind_param("i", $room_type_filter);
+$stmt->execute();
+$all_rooms = $stmt->get_result();
+$stmt->close();
+$conn->next_result();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
+    $room_id = $_POST['room_id'];
+    $check_in = $_POST['check_in'];
+    $check_out = $_POST['check_out'];
+    $special_requests = $_POST['special_requests'];
+    
+    if (strtotime($check_in) < strtotime(date('Y-m-d'))) {
+        $error = 'Check-in date cannot be in the past';
+    } elseif (strtotime($check_out) <= strtotime($check_in)) {
+        $error = 'Check-out date must be after check-in date';
+    } else {
+        $stmt = $conn->prepare("CALL sp_check_date_conflict(?, ?, ?)");
+        $stmt->bind_param("iss", $room_id, $check_in, $check_out);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $conflict = $result->fetch_assoc();
         $stmt->close();
         $conn->next_result();
+        
+        if ($conflict['conflict_count'] > 0) {
+            $error = 'The selected dates are already booked for this room. Please choose different dates.';
+        } else {
+            $stmt = $conn->prepare("CALL sp_create_reservation(?, ?, ?, ?, ?)");
+            $stmt->bind_param("iisss", $_SESSION['user_id'], $room_id, $check_in, $check_out, $special_requests);
+            
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result && $row = $result->fetch_assoc()) {
+                    $reservation_id = $row['reservation_id'];
+                    header('Location: payment.php?id=' . $reservation_id);
+                    exit();
+                }
+            } else {
+                $error = 'Unable to create reservation. Please try again.';
+            }
+            
+            $stmt->close();
+            $conn->next_result();
+        }
     }
+}
+
+function getReservedDates($conn, $room_id) {
+    $stmt = $conn->prepare("CALL sp_get_room_reservations(?)");
+    $stmt->bind_param("i", $room_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $reserved_dates = [];
+    
+    while ($row = $result->fetch_assoc()) {
+        $reserved_dates[] = [
+            'check_in' => $row['check_in_date'],
+            'check_out' => $row['check_out_date'],
+            'status' => $row['status']
+        ];
+    }
+    
+    $stmt->close();
+    $conn->next_result();
+    
+    return $reserved_dates;
+}
+
+function getDisabledDatesJson($reserved_dates) {
+    $disabled_dates = [];
+    
+    foreach ($reserved_dates as $reservation) {
+        $start = strtotime($reservation['check_in']);
+        $end = strtotime($reservation['check_out']);
+        
+        for ($date = $start; $date < $end; $date = strtotime('+1 day', $date)) {
+            $disabled_dates[] = date('Y-m-d', $date);
+        }
+    }
+    
+    return json_encode($disabled_dates);
 }
 
 $db->close();
@@ -247,38 +287,49 @@ $db->close();
             padding: 40px;
         }
         
-        .search-section {
+        .filter-section {
             background: white;
-            padding: 35px;
+            padding: 25px 35px;
             border-radius: 20px;
             margin-bottom: 35px;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-        }
-        
-        .search-section h2 {
-            color: #1e293b;
-            margin-bottom: 25px;
-            font-size: 24px;
-            font-weight: 700;
             display: flex;
             align-items: center;
-            gap: 10px;
-        }
-        
-        .search-section h2 i {
-            color: #7c3aed;
-        }
-        
-        .search-form {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
-            align-items: end;
         }
         
-        .form-group {
+        .filter-section label {
+            color: #475569;
+            font-weight: 600;
+            font-size: 14px;
             display: flex;
-            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .filter-section label i {
+            color: #7c3aed;
+            font-size: 16px;
+        }
+        
+        .filter-section select {
+            padding: 12px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 14px;
+            font-family: 'Poppins', sans-serif;
+            color: #334155;
+            min-width: 200px;
+        }
+        
+        .filter-section select:focus {
+            outline: none;
+            border-color: #7c3aed;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+        }
+        
+        input, select, textarea {
+            font-family: 'Poppins', sans-serif;
         }
         
         label {
@@ -296,20 +347,24 @@ $db->close();
             font-size: 16px;
         }
         
-        input, select {
+        input {
             padding: 14px;
             border: 2px solid #e2e8f0;
             border-radius: 10px;
             font-size: 14px;
             transition: all 0.3s;
-            font-family: 'Poppins', sans-serif;
             color: #334155;
         }
         
-        input:focus, select:focus {
+        input:focus {
             outline: none;
             border-color: #7c3aed;
             box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+        }
+        
+        input.disabled-date {
+            background-color: #fee2e2;
+            cursor: not-allowed;
         }
         
         .btn {
@@ -331,6 +386,12 @@ $db->close();
         .btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 15px rgba(124, 58, 237, 0.4);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
         
         .error {
@@ -371,7 +432,7 @@ $db->close();
         
         .rooms-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
             gap: 25px;
         }
         
@@ -474,10 +535,91 @@ $db->close();
             font-weight: 500;
         }
         
+        .reserved-dates {
+            margin: 20px 0;
+            padding: 15px;
+            background: #fef3c7;
+            border-radius: 10px;
+            border-left: 3px solid #f59e0b;
+        }
+        
+        .reserved-dates h4 {
+            color: #92400e;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .reserved-dates h4 i {
+            font-size: 14px;
+        }
+        
+        .reserved-dates ul {
+            list-style: none;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        
+        .reserved-dates li {
+            color: #78350f;
+            font-size: 12px;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+        }
+        
+        .reserved-dates li:last-child {
+            border-bottom: none;
+        }
+        
+        .reserved-dates li i {
+            color: #f59e0b;
+            margin-right: 6px;
+            font-size: 10px;
+        }
+        
+        .no-reservations {
+            color: #059669;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .no-reservations i {
+            color: #10b981;
+        }
+        
         .book-form {
             margin-top: 20px;
             padding-top: 20px;
             border-top: 2px solid #f0f2f5;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .date-warning {
+            background: #fef3c7;
+            color: #92400e;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            margin-top: 8px;
+            display: none;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .date-warning.show {
+            display: flex;
+        }
+        
+        .date-warning i {
+            color: #f59e0b;
         }
         
         textarea {
@@ -533,10 +675,6 @@ $db->close();
             
             .main-content {
                 margin-left: 0;
-            }
-            
-            .search-form {
-                grid-template-columns: 1fr;
             }
             
             .rooms-grid {
@@ -606,119 +744,261 @@ $db->close();
         </div>
         
         <div class="container">
-            <div class="search-section">
-                <h2 class="playfair"><i class="fas fa-search"></i> Search Available Rooms</h2>
-                
-                <?php if($error): ?>
-                    <div class="error">
-                        <i class="fas fa-exclamation-circle"></i>
-                        <?php echo htmlspecialchars($error); ?>
-                    </div>
-                <?php endif; ?>
-                
-                <?php if($success): ?>
-                    <div class="success">
-                        <i class="fas fa-check-circle"></i>
-                        <?php echo htmlspecialchars($success); ?>
-                    </div>
-                <?php endif; ?>
-                
-                <form method="POST" class="search-form">
-                    <div class="form-group">
-                        <label for="check_in">
-                            <i class="fas fa-calendar-check"></i>
-                            Check-In Date
-                        </label>
-                        <input type="date" id="check_in" name="check_in" required min="<?php echo date('Y-m-d'); ?>" value="<?php echo isset($_POST['check_in']) ? $_POST['check_in'] : ''; ?>">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="check_out">
-                            <i class="fas fa-calendar-times"></i>
-                            Check-Out Date
-                        </label>
-                        <input type="date" id="check_out" name="check_out" required min="<?php echo date('Y-m-d'); ?>" value="<?php echo isset($_POST['check_out']) ? $_POST['check_out'] : ''; ?>">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="room_type_id">
-                            <i class="fas fa-bed"></i>
-                            Room Type
-                        </label>
-                        <select id="room_type_id" name="room_type_id">
-                            <option value="">All Types</option>
-                            <?php foreach($room_types as $type): ?>
-                                <option value="<?php echo $type['room_type_id']; ?>" <?php echo (isset($_POST['room_type_id']) && $_POST['room_type_id'] == $type['room_type_id']) ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($type['type_name']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <button type="submit" name="search" class="btn">
-                            <i class="fas fa-search"></i>
-                            Search Rooms
-                        </button>
-                    </div>
-                </form>
+            <?php if($error): ?>
+                <div class="error">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <?php echo htmlspecialchars($error); ?>
+                </div>
+            <?php endif; ?>
+            
+            <?php if($success): ?>
+                <div class="success">
+                    <i class="fas fa-check-circle"></i>
+                    <?php echo htmlspecialchars($success); ?>
+                </div>
+            <?php endif; ?>
+            
+            <div class="filter-section">
+                <label for="room_type_filter">
+                    <i class="fas fa-filter"></i>
+                    Filter by Room Type:
+                </label>
+                <select id="room_type_filter" onchange="window.location.href='booking.php?room_type_id='+this.value">
+                    <option value="">All Types</option>
+                    <?php foreach($room_types as $type): ?>
+                        <option value="<?php echo $type['room_type_id']; ?>" <?php echo ($room_type_filter == $type['room_type_id']) ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($type['type_name']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
             
-            <?php if($available_rooms !== null): ?>
-                <?php if($available_rooms->num_rows > 0): ?>
-                    <div class="rooms-grid">
-                        <?php while($room = $available_rooms->fetch_assoc()): ?>
-                            <div class="room-card">
-                                <h3>
-                                    <i class="fas fa-door-open"></i>
-                                    Room <?php echo htmlspecialchars($room['room_number']); ?>
-                                </h3>
-                                <div class="room-info">
-                                    <p><strong>Type:</strong> <?php echo htmlspecialchars($room['type_name']); ?></p>
-                                    <p><?php echo htmlspecialchars($room['description']); ?></p>
+            <?php if($all_rooms->num_rows > 0): ?>
+                <div class="rooms-grid">
+                    <?php 
+                    $db_temp = new Database();
+                    $conn_temp = $db_temp->getConnection();
+                    
+                    while($room = $all_rooms->fetch_assoc()): 
+                        $reserved_dates = getReservedDates($conn_temp, $room['room_id']);
+                        $disabled_dates_json = getDisabledDatesJson($reserved_dates);
+                    ?>
+                        <div class="room-card">
+                            <h3>
+                                <i class="fas fa-door-open"></i>
+                                Room <?php echo htmlspecialchars($room['room_number']); ?>
+                            </h3>
+                            <div class="room-info">
+                                <p><strong>Type:</strong> <?php echo htmlspecialchars($room['type_name']); ?></p>
+                                <p><?php echo htmlspecialchars($room['description']); ?></p>
+                            </div>
+                            <div class="room-details">
+                                <div class="room-detail-item">
+                                    <i class="fas fa-users"></i>
+                                    <span><?php echo $room['max_occupancy']; ?> Guests</span>
                                 </div>
-                                <div class="room-details">
-                                    <div class="room-detail-item">
-                                        <i class="fas fa-users"></i>
-                                        <span><?php echo $room['max_occupancy']; ?> Guests</span>
-                                    </div>
-                                    <div class="room-detail-item">
-                                        <i class="fas fa-building"></i>
-                                        <span>Floor <?php echo $room['floor']; ?></span>
-                                    </div>
+                                <div class="room-detail-item">
+                                    <i class="fas fa-building"></i>
+                                    <span>Floor <?php echo $room['floor']; ?></span>
                                 </div>
-                                <div class="room-price">
-                                    ₱<?php echo number_format($room['base_price'], 2); ?>
-                                    <span>/night</span>
+                            </div>
+                            <div class="room-price">
+                                ₱<?php echo number_format($room['base_price'], 2); ?>
+                                <span>/night</span>
+                            </div>
+                            
+                            <div class="reserved-dates">
+                                <h4><i class="fas fa-calendar-times"></i> Reserved Dates</h4>
+                                <?php if(count($reserved_dates) > 0): ?>
+                                    <ul>
+                                        <?php foreach($reserved_dates as $reservation): ?>
+                                            <li>
+                                                <i class="fas fa-circle"></i>
+                                                <?php echo date('M d, Y', strtotime($reservation['check_in'])); ?> - <?php echo date('M d, Y', strtotime($reservation['check_out'])); ?>
+                                                (<?php echo ucfirst($reservation['status']); ?>)
+                                            </li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                                <?php else: ?>
+                                    <p class="no-reservations">
+                                        <i class="fas fa-check-circle"></i>
+                                        No upcoming reservations
+                                    </p>
+                                <?php endif; ?>
+                            </div>
+                            
+                            <form method="POST" class="book-form" id="form_<?php echo $room['room_id']; ?>" onsubmit="return validateDates(<?php echo $room['room_id']; ?>)">
+                                <input type="hidden" name="room_id" value="<?php echo $room['room_id']; ?>">
+                                <input type="hidden" id="disabled_dates_<?php echo $room['room_id']; ?>" value='<?php echo $disabled_dates_json; ?>'>
+                                
+                                <div class="form-group">
+                                    <label for="check_in_<?php echo $room['room_id']; ?>">
+                                        <i class="fas fa-calendar-check"></i>
+                                        Check-In Date
+                                    </label>
+                                    <input type="date" 
+                                           id="check_in_<?php echo $room['room_id']; ?>" 
+                                           name="check_in" 
+                                           required 
+                                           min="<?php echo date('Y-m-d'); ?>"
+                                           onchange="validateDateRange(<?php echo $room['room_id']; ?>)">
+                                    <div class="date-warning" id="check_in_warning_<?php echo $room['room_id']; ?>">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                        <span>This date is already occupied</span>
+                                    </div>
                                 </div>
                                 
-                                <form method="POST" class="book-form">
-                                    <input type="hidden" name="room_id" value="<?php echo $room['room_id']; ?>">
-                                    <div class="form-group">
-                                        <label for="special_requests_<?php echo $room['room_id']; ?>">
-                                            <i class="fas fa-comment-dots"></i>
-                                            Special Requests (Optional)
-                                        </label>
-                                        <textarea id="special_requests_<?php echo $room['room_id']; ?>" name="special_requests" placeholder="Any special requirements..."></textarea>
+                                <div class="form-group">
+                                    <label for="check_out_<?php echo $room['room_id']; ?>">
+                                        <i class="fas fa-calendar-times"></i>
+                                        Check-Out Date
+                                    </label>
+                                    <input type="date" 
+                                           id="check_out_<?php echo $room['room_id']; ?>" 
+                                           name="check_out" 
+                                           required 
+                                           min="<?php echo date('Y-m-d'); ?>"
+                                           onchange="validateDateRange(<?php echo $room['room_id']; ?>)">
+                                    <div class="date-warning" id="check_out_warning_<?php echo $room['room_id']; ?>">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                        <span>This date is already occupied</span>
                                     </div>
-                                    <button type="submit" name="book" class="btn" style="width: 100%; margin-top: 15px; justify-content: center;">
-                                        <i class="fas fa-calendar-check"></i>
-                                        Book Now
-                                    </button>
-                                </form>
-                            </div>
-                        <?php endwhile; ?>
-                    </div>
-                <?php else: ?>
-                    <div class="empty-state">
-                        <i class="fas fa-bed"></i>
-                        <h3>No Rooms Available</h3>
-                        <p>Sorry, no rooms are available for the selected dates</p>
-                        <p>Please try different dates or room types</p>
-                    </div>
-                <?php endif; ?>
+                                </div>
+                                
+                                <div class="date-warning" id="range_warning_<?php echo $room['room_id']; ?>">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    <span>Selected date range includes occupied dates</span>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="special_requests_<?php echo $room['room_id']; ?>">
+                                        <i class="fas fa-comment-dots"></i>
+                                        Special Requests (Optional)
+                                    </label>
+                                    <textarea id="special_requests_<?php echo $room['room_id']; ?>" name="special_requests" placeholder="Any special requirements..."></textarea>
+                                </div>
+                                <button type="submit" name="book" class="btn" id="book_btn_<?php echo $room['room_id']; ?>" style="width: 100%; justify-content: center;">
+                                    <i class="fas fa-calendar-check"></i>
+                                    Book Now
+                                </button>
+                            </form>
+                        </div>
+                    <?php 
+                    endwhile; 
+                    $db_temp->close();
+                    ?>
+                </div>
+            <?php else: ?>
+                <div class="empty-state">
+                    <i class="fas fa-bed"></i>
+                    <h3>No Rooms Available</h3>
+                    <p>No rooms found matching your criteria</p>
+                </div>
             <?php endif; ?>
         </div>
     </div>
+    
+    <script>
+        function validateDateRange(roomId) {
+            const checkInInput = document.getElementById('check_in_' + roomId);
+            const checkOutInput = document.getElementById('check_out_' + roomId);
+            const disabledDatesInput = document.getElementById('disabled_dates_' + roomId);
+            const checkInWarning = document.getElementById('check_in_warning_' + roomId);
+            const checkOutWarning = document.getElementById('check_out_warning_' + roomId);
+            const rangeWarning = document.getElementById('range_warning_' + roomId);
+            const bookBtn = document.getElementById('book_btn_' + roomId);
+            
+            const checkIn = checkInInput.value;
+            const checkOut = checkOutInput.value;
+            const disabledDates = JSON.parse(disabledDatesInput.value);
+            
+            let hasError = false;
+            
+            checkInWarning.classList.remove('show');
+            checkOutWarning.classList.remove('show');
+            rangeWarning.classList.remove('show');
+            
+            if (checkIn && disabledDates.includes(checkIn)) {
+                checkInWarning.classList.add('show');
+                hasError = true;
+            }
+            
+            if (checkOut && disabledDates.includes(checkOut)) {
+                checkOutWarning.classList.add('show');
+                hasError = true;
+            }
+            
+            if (checkIn && checkOut && !hasError) {
+                const startDate = new Date(checkIn);
+                const endDate = new Date(checkOut);
+                
+                if (endDate <= startDate) {
+                    hasError = true;
+                } else {
+                    for (let d = new Date(startDate); d < endDate; d.setDate(d.getDate() + 1)) {
+                        const dateStr = d.toISOString().split('T')[0];
+                        if (disabledDates.includes(dateStr)) {
+                            rangeWarning.classList.add('show');
+                            hasError = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (hasError) {
+                bookBtn.disabled = true;
+                bookBtn.style.opacity = '0.5';
+                bookBtn.style.cursor = 'not-allowed';
+            } else {
+                bookBtn.disabled = false;
+                bookBtn.style.opacity = '1';
+                bookBtn.style.cursor = 'pointer';
+            }
+        }
+        
+        function validateDates(roomId) {
+            const checkInInput = document.getElementById('check_in_' + roomId);
+            const checkOutInput = document.getElementById('check_out_' + roomId);
+            const disabledDatesInput = document.getElementById('disabled_dates_' + roomId);
+            
+            const checkIn = checkInInput.value;
+            const checkOut = checkOutInput.value;
+            const disabledDates = JSON.parse(disabledDatesInput.value);
+            
+            if (!checkIn || !checkOut) {
+                alert('Please select both check-in and check-out dates');
+                return false;
+            }
+            
+            const startDate = new Date(checkIn);
+            const endDate = new Date(checkOut);
+            
+            if (endDate <= startDate) {
+                alert('Check-out date must be after check-in date');
+                return false;
+            }
+            
+            if (disabledDates.includes(checkIn)) {
+                alert('Check-in date is already occupied. Please select a different date.');
+                return false;
+            }
+            
+            if (disabledDates.includes(checkOut)) {
+                alert('Check-out date is already occupied. Please select a different date.');
+                return false;
+            }
+            
+            for (let d = new Date(startDate); d < endDate; d.setDate(d.getDate() + 1)) {
+                const dateStr = d.toISOString().split('T')[0];
+                if (disabledDates.includes(dateStr)) {
+                    alert('Selected date range includes occupied dates. Please choose different dates.');
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+    </script>
 </body>
 </html>

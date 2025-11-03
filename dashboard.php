@@ -15,11 +15,10 @@ $conn = $db->getConnection();
 
 $stats = null;
 if ($_SESSION['role'] === 'admin' || $_SESSION['role'] === 'manager') {
-    $result = $conn->query("CALL sp_get_dashboard_stats()");
+    $result = $conn->query("SELECT * FROM vw_dashboard_stats");
     if ($result) {
         $stats = $result->fetch_assoc();
         $result->close();
-        $conn->next_result();
     }
 }
 
@@ -64,14 +63,13 @@ $db->close();
 ?>
 <!DOCTYPE html>
 <html lang="en">
-    <link rel="stylesheet" href="css/dashboard.css">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Hotel Reservation System</title>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="dashboard.css">
+    <link rel="stylesheet" href="css/dashboard.css">
 </head>
 <body>
     <div class="sidebar">

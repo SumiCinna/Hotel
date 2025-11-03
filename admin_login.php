@@ -3,7 +3,6 @@ require_once 'config.php';
 
 $error = '';
 
-// Built-in admin credentials (hardcoded)
 define('ADMIN_USERNAME', 'admin');
 define('ADMIN_PASSWORD', 'admin123');
 

@@ -13,19 +13,22 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'manager') {
 $db = new Database();
 $conn = $db->getConnection();
 
-$result = $conn->query("CALL sp_get_dashboard_stats()");
-$stats = null;
-if ($result) {
-    $stats = $result->fetch_assoc();
-    $result->close();
-    $conn->next_result();
+$today_revenue = 0;
+$month_revenue = 0;
+
+$today_query = "SELECT SUM(p.amount) as revenue FROM payments p WHERE DATE(p.payment_date) = CURDATE() AND p.payment_status = 'completed'";
+$today_result = $conn->query($today_query);
+if ($today_result && $row = $today_result->fetch_assoc()) {
+    $today_revenue = $row['revenue'] ?? 0;
 }
 
-$reservations = $conn->query("SELECT res.reservation_id, u.full_name, r.room_number, rt.type_name, res.check_in_date, res.check_out_date, res.total_amount, res.status FROM reservations res JOIN users u ON res.user_id = u.user_id JOIN rooms r ON res.room_id = r.room_id JOIN room_types rt ON r.type_id = rt.type_id ORDER BY res.created_at DESC LIMIT 15");
+$month_query = "SELECT SUM(p.amount) as revenue FROM payments p WHERE MONTH(p.payment_date) = MONTH(CURDATE()) AND YEAR(p.payment_date) = YEAR(CURDATE()) AND p.payment_status = 'completed'";
+$month_result = $conn->query($month_query);
+if ($month_result && $row = $month_result->fetch_assoc()) {
+    $month_revenue = $row['revenue'] ?? 0;
+}
 
-$rooms = $conn->query("SELECT r.room_id, r.room_number, rt.type_name, r.floor, r.status FROM rooms r JOIN room_types rt ON r.type_id = rt.type_id ORDER BY r.room_number");
-
-$monthly_report = $conn->query("SELECT DATE_FORMAT(res.created_at, '%Y-%m') as month, SUM(res.total_amount) as revenue, COUNT(res.reservation_id) as bookings FROM reservations res WHERE res.created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH) AND res.status != 'cancelled' GROUP BY DATE_FORMAT(res.created_at, '%Y-%m') ORDER BY month DESC");
+$monthly_report = $conn->query("SELECT DATE_FORMAT(p.payment_date, '%Y-%m') as month, COUNT(DISTINCT p.reservation_id) as bookings, SUM(p.amount) as revenue FROM payments p WHERE p.payment_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH) AND p.payment_status = 'completed' GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m') ORDER BY month DESC");
 
 $db->close();
 ?>
@@ -107,7 +110,6 @@ $db->close();
                 <p>Generate Reports & View Transaction Base</p>
             </div>
             
-            <?php if ($stats): ?>
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-header">
@@ -115,7 +117,7 @@ $db->close();
                             <i class="fas fa-peso-sign"></i>
                         </div>
                         <div class="stat-value">
-                            <h3>₱<?php echo number_format($stats['today_revenue'], 2); ?></h3>
+                            <h3>₱<?php echo number_format($today_revenue, 2); ?></h3>
                             <p>Today's Revenue</p>
                         </div>
                     </div>
@@ -126,13 +128,12 @@ $db->close();
                             <i class="fas fa-chart-line"></i>
                         </div>
                         <div class="stat-value">
-                            <h3>₱<?php echo number_format($stats['month_revenue'], 2); ?></h3>
+                            <h3>₱<?php echo number_format($month_revenue, 2); ?></h3>
                             <p>This Month's Revenue</p>
                         </div>
                     </div>
                 </div>
             </div>
-            <?php endif; ?>
             
             <div class="section">
                 <div class="section-header">
