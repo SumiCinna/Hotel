@@ -20,40 +20,19 @@ $offset = ($page - 1) * $per_page;
 $search = isset($_GET['search']) ? trim($_GET['search']) : '';
 $role_filter = isset($_GET['role']) ? trim($_GET['role']) : '';
 
-$where_conditions = [];
-$count_where_conditions = [];
-
-if (!empty($search)) {
-    $search_escaped = $conn->real_escape_string($search);
-    $search_condition = "(username LIKE '%{$search_escaped}%' OR email LIKE '%{$search_escaped}%' OR full_name LIKE '%{$search_escaped}%' OR phone LIKE '%{$search_escaped}%')";
-    $where_conditions[] = $search_condition;
-    $count_where_conditions[] = $search_condition;
-}
-
-if (!empty($role_filter)) {
-    $role_escaped = $conn->real_escape_string($role_filter);
-    $role_condition = "role = '{$role_escaped}'";
-    $where_conditions[] = $role_condition;
-    $count_where_conditions[] = $role_condition;
-}
-
-$where_clause = '';
-$count_where_clause = '';
-
-if (!empty($where_conditions)) {
-    $where_clause = " WHERE " . implode(" AND ", $where_conditions);
-}
-
-if (!empty($count_where_conditions)) {
-    $count_where_clause = " WHERE " . implode(" AND ", $count_where_conditions);
-}
-
-$total_result = $conn->query("SELECT COUNT(*) as total FROM users{$count_where_clause}");
+$count_stmt = $conn->prepare("CALL sp_get_users_count(?, ?)");
+$count_stmt->bind_param("ss", $search, $role_filter);
+$count_stmt->execute();
+$total_result = $count_stmt->get_result();
 $total_row = $total_result->fetch_assoc();
 $total_users = $total_row['total'];
 $total_pages = ceil($total_users / $per_page);
+$count_stmt->close();
 
-$users = $conn->query("SELECT user_id, username, email, full_name, phone, role, is_active, created_at FROM users{$where_clause} ORDER BY created_at DESC LIMIT $per_page OFFSET $offset");
+$stmt = $conn->prepare("CALL sp_get_users(?, ?, ?, ?)");
+$stmt->bind_param("ssii", $search, $role_filter, $per_page, $offset);
+$stmt->execute();
+$users = $stmt->get_result();
 
 $db->close();
 ?>

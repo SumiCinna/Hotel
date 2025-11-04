@@ -9,22 +9,26 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'staff') {
 $db = new Database();
 $conn = $db->getConnection();
 
-$active = $conn->query("SELECT room_type_id, type_name, description, base_price, max_occupancy FROM room_types WHERE is_archived = 0 ORDER BY type_name");
-$archived = $conn->query("SELECT room_type_id, type_name, description, base_price, max_occupancy FROM room_types WHERE is_archived = 1 ORDER BY type_name");
+$stmt = $conn->prepare("CALL sp_get_room_types()");
+$stmt->execute();
+$result = $stmt->get_result();
 
 $activeData = [];
 $archivedData = [];
 
-while ($row = $active->fetch_assoc()) {
-    $activeData[] = $row;
+while ($row = $result->fetch_assoc()) {
+    if ($row['is_archived'] == 0) {
+        unset($row['is_archived']);
+        $activeData[] = $row;
+    } else {
+        unset($row['is_archived']);
+        $archivedData[] = $row;
+    }
 }
 
-while ($row = $archived->fetch_assoc()) {
-    $archivedData[] = $row;
-}
+$stmt->close();
+$db->close();
 
 header('Content-Type: application/json');
 echo json_encode(['active' => $activeData, 'archived' => $archivedData]);
-
-$db->close();
 ?>

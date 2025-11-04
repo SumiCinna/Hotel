@@ -18,17 +18,20 @@ $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $per_page = 10;
 $offset = ($page - 1) * $per_page;
 
-$where_clause = "1=1";
-if ($filter !== 'all') {
-    $where_clause .= " AND r.status = '" . $conn->real_escape_string($filter) . "'";
+$view_name = 'vw_staff_rooms_all';
+if ($filter === 'available') {
+    $view_name = 'vw_staff_rooms_available';
+} elseif ($filter === 'occupied') {
+    $view_name = 'vw_staff_rooms_occupied';
+} elseif ($filter === 'maintenance') {
+    $view_name = 'vw_staff_rooms_maintenance';
 }
 
-$total_rooms_result = $conn->query("SELECT COUNT(*) as count FROM rooms r WHERE $where_clause");
-$total_rooms_row = $total_rooms_result->fetch_assoc();
+$total_rooms_row = $conn->query("SELECT COUNT(*) as count FROM $view_name")->fetch_assoc();
 $total_rooms = $total_rooms_row['count'];
 $total_pages = ceil($total_rooms / $per_page);
 
-$rooms = $conn->query("SELECT r.room_id, r.room_number, rt.type_name, rt.base_price, r.floor, r.status, rt.max_occupancy, rt.description FROM rooms r JOIN room_types rt ON r.room_type_id = rt.room_type_id WHERE $where_clause ORDER BY r.room_number LIMIT $offset, $per_page");
+$rooms = $conn->query("SELECT * FROM $view_name LIMIT $offset, $per_page");
 
 if (!$rooms) {
     die("Query Error: " . $conn->error);

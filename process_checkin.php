@@ -16,7 +16,8 @@ $reservation_id = $_GET['id'];
 $db = new Database();
 $conn = $db->getConnection();
 
-$stmt = $conn->prepare("SELECT res.reservation_id, res.room_id, res.status FROM reservations res WHERE res.reservation_id = ?");
+
+$stmt = $conn->prepare("CALL sp_get_basic_reservation_info(?)");
 $stmt->bind_param("i", $reservation_id);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -28,6 +29,7 @@ if ($result->num_rows === 0) {
 }
 
 $reservation = $result->fetch_assoc();
+$stmt->close(); 
 
 if ($reservation['status'] !== 'confirmed') {
     $_SESSION['error'] = "Only confirmed reservations can be checked in!";
@@ -35,13 +37,18 @@ if ($reservation['status'] !== 'confirmed') {
     exit();
 }
 
-$update_reservation = $conn->prepare("UPDATE reservations SET status = 'checked_in' WHERE reservation_id = ?");
-$update_reservation->bind_param("i", $reservation_id);
-$update_reservation->execute();
+$stmt = $conn->prepare("CALL sp_update_reservation_status(?, ?)");
+$new_reservation_status = 'checked_in';
+$stmt->bind_param("is", $reservation_id, $new_reservation_status);
+$stmt->execute();
+$stmt->close();
 
-$update_room = $conn->prepare("UPDATE rooms SET status = 'occupied' WHERE room_id = ?");
-$update_room->bind_param("i", $reservation['room_id']);
-$update_room->execute();
+
+$stmt = $conn->prepare("CALL sp_update_room_status(?, ?)");
+$new_room_status = 'occupied';
+$stmt->bind_param("is", $reservation['room_id'], $new_room_status);
+$stmt->execute();
+$stmt->close();
 
 $db->close();
 

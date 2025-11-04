@@ -17,18 +17,17 @@ $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $per_page = 5;
 $offset = ($page - 1) * $per_page;
 
-$total_pending_result = $conn->query("SELECT COUNT(*) as count FROM reservations WHERE status = 'pending' OR status = 'confirmed'");
-$total_pending_row = $total_pending_result->fetch_assoc();
+$total_pending_row = $conn->query("SELECT * FROM vw_staff_total_pending_count")->fetch_assoc();
 $total_pending = $total_pending_row['count'];
 $total_pages = ceil($total_pending / $per_page);
 
-$latest_reservations = $conn->query("SELECT res.reservation_id, u.full_name, u.phone, u.email, r.room_number, rt.type_name, res.check_in_date, res.check_out_date, res.total_amount, res.status, res.special_requests FROM reservations res JOIN users u ON res.user_id = u.user_id JOIN rooms r ON res.room_id = r.room_id JOIN room_types rt ON r.room_type_id = rt.room_type_id ORDER BY res.created_at DESC LIMIT 5");
+$latest_reservations = $conn->query("SELECT * FROM vw_staff_latest_reservations LIMIT 5");
 
-$pending_reservations = $conn->query("SELECT res.reservation_id, u.full_name, u.phone, u.email, r.room_number, rt.type_name, res.check_in_date, res.check_out_date, res.total_amount, res.status, res.special_requests FROM reservations res JOIN users u ON res.user_id = u.user_id JOIN rooms r ON res.room_id = r.room_id JOIN room_types rt ON r.room_type_id = rt.room_type_id WHERE res.status = 'pending' OR res.status = 'confirmed' ORDER BY res.check_in_date LIMIT $offset, $per_page");
+$pending_reservations = $conn->query("SELECT * FROM vw_staff_pending_reservations LIMIT $offset, $per_page");
 
-$available_rooms = $conn->query("SELECT r.room_id, r.room_number, rt.type_name, rt.base_price, r.floor, r.status FROM rooms r JOIN room_types rt ON r.room_type_id = rt.room_type_id WHERE r.status = 'available' AND r.is_archived = 0 AND rt.is_archived = 0 ORDER BY r.room_number LIMIT 10");
+$available_rooms = $conn->query("SELECT * FROM vw_staff_available_rooms LIMIT 10");
 
-$stats = $conn->query("SELECT (SELECT COUNT(*) FROM rooms WHERE status = 'available' AND is_archived = 0) as available_rooms, (SELECT COUNT(*) FROM rooms WHERE status = 'occupied') as occupied_rooms, (SELECT COUNT(*) FROM reservations WHERE status = 'pending') as pending_reservations, (SELECT COUNT(*) FROM reservations WHERE DATE(check_in_date) = CURDATE()) as today_checkins, (SELECT COUNT(*) FROM reservations WHERE DATE(check_out_date) = CURDATE()) as today_checkouts")->fetch_assoc();
+$stats = $conn->query("SELECT * FROM vw_staff_stats")->fetch_assoc();
 
 $db->close();
 ?>

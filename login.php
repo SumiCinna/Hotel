@@ -13,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db = new Database();
         $conn = $db->getConnection();
         
-        $stmt = $conn->prepare("SELECT user_id, username, password, email, full_name, phone, role, is_active FROM users WHERE username = ? AND is_active = TRUE");
+        $stmt = $conn->prepare("CALL sp_get_user_by_username(?)");
         $stmt->bind_param("s", $username);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -21,7 +21,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($result && $row = $result->fetch_assoc()) {
             if (password_verify($password, $row['password'])) {
                 
-                $update_stmt = $conn->prepare("UPDATE users SET last_login = NOW() WHERE user_id = ?");
+                $stmt->close();
+                
+                $update_stmt = $conn->prepare("CALL sp_update_last_login(?)");
                 $update_stmt->bind_param("i", $row['user_id']);
                 $update_stmt->execute();
                 $update_stmt->close();

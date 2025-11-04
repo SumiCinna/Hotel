@@ -4,26 +4,7 @@ require_once 'config.php';
 header('Content-Type: application/json');
 
 try {
-    $sql = "SELECT 
-                r.room_id,
-                r.room_number,
-                r.room_type_id,
-                r.floor,
-                r.status,
-                r.is_archived as room_archived,
-                rt.type_name,
-                rt.description,
-                rt.base_price,
-                rt.max_occupancy,
-                rt.image_path,
-                rt.is_archived as type_archived
-            FROM rooms r
-            INNER JOIN room_types rt ON r.room_type_id = rt.room_type_id
-            WHERE r.is_archived = 0 
-            AND rt.is_archived = 0 
-            AND r.status != 'maintenance'";
-    
-    $stmt = $pdo->prepare($sql);
+    $stmt = $pdo->prepare("CALL sp_get_all_active_rooms()");
     $stmt->execute();
     
     $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);

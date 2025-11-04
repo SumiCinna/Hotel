@@ -10,11 +10,12 @@ $reservation_id = intval($_GET['id']);
 $db = new Database();
 $conn = $db->getConnection();
 
-$stmt = $conn->prepare("SELECT r.*, rm.room_number, rt.type_name, rt.base_price 
-                        FROM reservations r 
-                        JOIN rooms rm ON r.room_id = rm.room_id 
-                        JOIN room_types rt ON rm.room_type_id = rt.room_type_id 
-                        WHERE r.reservation_id = ? AND r.user_id = ?");
+$stmt = $conn->prepare("CALL sp_get_reservation_details(?, ?)");
+
+if (!$stmt) {
+    die("Prepare failed: " . $conn->error);
+}
+
 $stmt->bind_param("ii", $reservation_id, $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -29,25 +30,63 @@ $stmt->close();
 
 $error = '';
 $success = '';
+$show_receipt = false;
+$payment_data = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $payment_method = $_POST['payment_method'];
     $amount = $reservation['total_amount'];
     $transaction_id = 'TXN' . time() . rand(1000, 9999);
     
-    $stmt = $conn->prepare("CALL sp_process_payment(?, ?, ?, ?)");
-    $stmt->bind_param("idss", $reservation_id, $amount, $payment_method, $transaction_id);
+    $conn->begin_transaction();
     
-    if ($stmt->execute()) {
-        $success = 'Payment processed successfully! Your reservation is confirmed.';
-        header('refresh:2;url=dashboard.php');
-    } else {
-        $error = 'Payment processing failed. Please try again.';
+    try {
+        $stmt = $conn->prepare("CALL sp_insert_payment(?, ?, ?, ?)");
+        
+        if (!$stmt) {
+            throw new Exception("Prepare failed: " . $conn->error);
+        }
+        
+        $stmt->bind_param("idss", $reservation_id, $amount, $payment_method, $transaction_id);
+        $stmt->execute();
+        $stmt->close();
+        
+        $stmt = $conn->prepare("CALL sp_update_reservation_status(?, ?)");
+        
+        if (!$stmt) {
+            throw new Exception("Prepare failed: " . $conn->error);
+        }
+        $new_status = 'confirmed';
+        $stmt->bind_param("is", $reservation_id, $new_status);
+        $stmt->execute();
+        $stmt->close();
+        
+        $conn->commit();
+        
+        $show_receipt = true;
+        $payment_data = [
+            'transaction_id' => $transaction_id,
+            'payment_method' => $payment_method,
+            'amount' => $amount,
+            'payment_date' => date('M d, Y h:i A')
+        ];
+    } catch (Exception $e) {
+        $conn->rollback();
+        $error = 'Payment processing failed. Please try again. Error: ' . $e->getMessage();
     }
-    
-    $stmt->close();
-    $conn->next_result();
 }
+
+$stmt = $conn->prepare("CALL sp_get_user_details(?)");
+
+if (!$stmt) {
+    die("Prepare failed: " . $conn->error);
+}
+
+$stmt->bind_param("i", $_SESSION['user_id']);
+$stmt->execute();
+$user_result = $stmt->get_result();
+$user_data = $user_result->fetch_assoc();
+$stmt->close();
 
 $db->close();
 
@@ -59,181 +98,31 @@ $nights = (strtotime($reservation['check_out_date']) - strtotime($reservation['c
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Payment - Hotel Reservation System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/payment.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        
-        .payment-card {
-            background: white;
-            border-radius: 10px;
-            padding: 40px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-        }
-        
-        h2 {
-            color: #667eea;
-            margin-bottom: 30px;
-            text-align: center;
-            font-size: 28px;
-        }
-        
-        .reservation-details {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 30px;
-        }
-        
-        .detail-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid #ddd;
-        }
-        
-        .detail-row:last-child {
-            border-bottom: none;
-        }
-        
-        .detail-label {
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .detail-value {
-            color: #666;
-        }
-        
-        .total-amount {
-            background: #667eea;
-            color: white;
-            padding: 20px;
-            border-radius: 8px;
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .total-amount h3 {
-            font-size: 24px;
-            margin-bottom: 10px;
-        }
-        
-        .total-amount .amount {
-            font-size: 36px;
-            font-weight: bold;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 8px;
-            color: #333;
-            font-weight: 600;
-        }
-        
-        select, input {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #ddd;
-            border-radius: 5px;
-            font-size: 14px;
-            transition: border-color 0.3s;
-        }
-        
-        select:focus, input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        .btn {
-            width: 100%;
-            padding: 15px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .btn:hover {
-            background: #5568d3;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-        
-        .error {
-            background: #fee;
-            color: #c33;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            border-left: 4px solid #c33;
-        }
-        
-        .success {
-            background: #efe;
-            color: #3c3;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            border-left: 4px solid #3c3;
-        }
-        
-        .back-link {
-            text-align: center;
-            margin-top: 20px;
-        }
-        
-        .back-link a {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 600;
-        }
-        
-        .payment-methods {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        
-        .payment-method {
-            padding: 15px;
-            border: 2px solid #ddd;
-            border-radius: 5px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .payment-method:hover {
-            border-color: #667eea;
-            background: #f8f9ff;
-        }
-        
-        .payment-method input[type="radio"] {
-            margin-right: 8px;
+        @media print {
+            .container {
+                display: none !important;
+            }
+            
+            #receiptModal {
+                display: block !important;
+                position: static !important;
+                background: white !important;
+            }
+            
+            .modal-content {
+                box-shadow: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                max-width: 100% !important;
+            }
+            
+            .modal-actions {
+                display: none !important;
+            }
         }
     </style>
 </head>
@@ -244,10 +133,6 @@ $nights = (strtotime($reservation['check_out_date']) - strtotime($reservation['c
             
             <?php if($error): ?>
                 <div class="error"><?php echo htmlspecialchars($error); ?></div>
-            <?php endif; ?>
-            
-            <?php if($success): ?>
-                <div class="success"><?php echo htmlspecialchars($success); ?></div>
             <?php endif; ?>
             
             <div class="reservation-details">
@@ -322,5 +207,115 @@ $nights = (strtotime($reservation['check_out_date']) - strtotime($reservation['c
             </div>
         </div>
     </div>
+
+    <?php if($show_receipt && $payment_data): ?>
+    <div id="receiptModal" class="modal show">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Payment Receipt</h2>
+            </div>
+            <div class="modal-body">
+                <div class="receipt">
+                    <div class="receipt-header">
+                        <h1>HOTEL RESERVATION</h1>
+                        <p>Official Payment Receipt</p>
+                        <p style="margin-top: 10px;"><span class="status-badge">PAID</span></p>
+                    </div>
+
+                    <div class="receipt-info">
+                        <div class="info-section">
+                            <h3>Guest Information</h3>
+                            <div class="info-row">
+                                <span class="info-label">Name:</span>
+                                <span class="info-value"><?php echo htmlspecialchars($user_data['full_name']); ?></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Email:</span>
+                                <span class="info-value"><?php echo htmlspecialchars($user_data['email']); ?></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Phone:</span>
+                                <span class="info-value"><?php echo htmlspecialchars($user_data['phone']); ?></span>
+                            </div>
+                        </div>
+
+                        <div class="info-section">
+                            <h3>Payment Information</h3>
+                            <div class="info-row">
+                                <span class="info-label">Transaction ID:</span>
+                                <span class="info-value"><?php echo htmlspecialchars($payment_data['transaction_id']); ?></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Payment Date:</span>
+                                <span class="info-value"><?php echo $payment_data['payment_date']; ?></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Payment Method:</span>
+                                <span class="info-value"><?php echo ucwords(str_replace('_', ' ', htmlspecialchars($payment_data['payment_method']))); ?></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <table class="receipt-table">
+                        <thead>
+                            <tr>
+                                <th>Description</th>
+                                <th>Details</th>
+                                <th style="text-align: right;">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <strong>Room Reservation</strong><br>
+                                    <small>Reservation #<?php echo $reservation['reservation_id']; ?></small>
+                                </td>
+                                <td>
+                                    Room <?php echo htmlspecialchars($reservation['room_number']); ?> - <?php echo htmlspecialchars($reservation['type_name']); ?><br>
+                                    <small><?php echo date('M d, Y', strtotime($reservation['check_in_date'])); ?> to <?php echo date('M d, Y', strtotime($reservation['check_out_date'])); ?></small><br>
+                                    <small><?php echo $nights; ?> night(s) × ₱<?php echo number_format($reservation['base_price'], 2); ?></small>
+                                </td>
+                                <td style="text-align: right;">₱<?php echo number_format($reservation['total_amount'], 2); ?></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="receipt-total">
+                        <div class="total-row">
+                            <span>Subtotal:</span>
+                            <span>₱<?php echo number_format($reservation['total_amount'], 2); ?></span>
+                        </div>
+                        
+                        <div class="total-row grand-total">
+                            <span>Total Paid:</span>
+                            <span>₱<?php echo number_format($payment_data['amount'], 2); ?></span>
+                        </div>
+                    </div>
+
+                    <div class="receipt-footer">
+                        <p>Thank you for your payment!</p>
+                        <p>This is an official receipt. Please keep for your records.</p>
+                        <p style="margin-top: 10px;">For inquiries, please contact our front desk.</p>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button onclick="printReceipt()" class="btn-print">🖨️ Print Receipt</button>
+                        <button onclick="closeAndRedirect()" class="btn-close">Close & Go to Dashboard</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <script>
+        function printReceipt() {
+            window.print();
+        }
+
+        function closeAndRedirect() {
+            window.location.href = 'dashboard.php';
+        }
+    </script>
 </body>
 </html>

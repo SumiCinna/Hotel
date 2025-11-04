@@ -14,12 +14,11 @@ $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $per_page = 10;
 $offset = ($page - 1) * $per_page;
 
-$count_query = "SELECT COUNT(DISTINCT res.reservation_id) as count FROM reservations res JOIN payments p ON res.reservation_id = p.reservation_id WHERE p.payment_status = 'completed'";
-$count_result = $conn->query($count_query);
+$count_result = $conn->query("SELECT * FROM vw_paid_reservations_count");
 $total_count = $count_result->fetch_assoc()['count'];
 $total_pages = ceil($total_count / $per_page);
 
-$reservations = $conn->query("SELECT res.reservation_id, u.full_name, u.email, u.phone, r.room_number, rt.type_name, res.check_in_date, res.check_out_date, res.total_amount, res.status, res.special_requests, res.created_at FROM reservations res JOIN users u ON res.user_id = u.user_id JOIN rooms r ON res.room_id = r.room_id JOIN room_types rt ON r.room_type_id = rt.room_type_id JOIN payments p ON res.reservation_id = p.reservation_id WHERE p.payment_status = 'completed' ORDER BY res.created_at DESC LIMIT $offset, $per_page");
+$reservations = $conn->query("SELECT * FROM vw_paid_reservations LIMIT $offset, $per_page");
 
 $db->close();
 ?>

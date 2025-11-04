@@ -16,19 +16,17 @@ $conn = $db->getConnection();
 $today_revenue = 0;
 $month_revenue = 0;
 
-$today_query = "SELECT SUM(p.amount) as revenue FROM payments p WHERE DATE(p.payment_date) = CURDATE() AND p.payment_status = 'completed'";
-$today_result = $conn->query($today_query);
+$today_result = $conn->query("SELECT * FROM vw_today_revenue");
 if ($today_result && $row = $today_result->fetch_assoc()) {
     $today_revenue = $row['revenue'] ?? 0;
 }
 
-$month_query = "SELECT SUM(p.amount) as revenue FROM payments p WHERE MONTH(p.payment_date) = MONTH(CURDATE()) AND YEAR(p.payment_date) = YEAR(CURDATE()) AND p.payment_status = 'completed'";
-$month_result = $conn->query($month_query);
+$month_result = $conn->query("SELECT * FROM vw_month_revenue");
 if ($month_result && $row = $month_result->fetch_assoc()) {
     $month_revenue = $row['revenue'] ?? 0;
 }
 
-$monthly_report = $conn->query("SELECT DATE_FORMAT(p.payment_date, '%Y-%m') as month, COUNT(DISTINCT p.reservation_id) as bookings, SUM(p.amount) as revenue FROM payments p WHERE p.payment_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH) AND p.payment_status = 'completed' GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m') ORDER BY month DESC");
+$monthly_report = $conn->query("SELECT * FROM vw_monthly_report");
 
 $db->close();
 ?>

@@ -10,13 +10,13 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'manager') {
 $db = new Database();
 $conn = $db->getConnection();
 
-$daily_report = $conn->query("SELECT DATE(p.payment_date) as date, COUNT(DISTINCT p.reservation_id) as bookings, SUM(p.amount) as revenue FROM payments p WHERE p.payment_status = 'completed' AND p.payment_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) GROUP BY DATE(p.payment_date) ORDER BY date DESC");
+$daily_report = $conn->query("SELECT * FROM vw_daily_revenue_report");
 
-$monthly_report = $conn->query("SELECT DATE_FORMAT(p.payment_date, '%Y-%m') as month, COUNT(DISTINCT p.reservation_id) as bookings, SUM(p.amount) as revenue FROM payments p WHERE p.payment_status = 'completed' AND p.payment_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH) GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m') ORDER BY month DESC");
+$monthly_report = $conn->query("SELECT * FROM vw_monthly_revenue_report");
 
-$room_type_report = $conn->query("SELECT rt.type_name, COUNT(res.reservation_id) as total_bookings, SUM(res.total_amount) as total_revenue FROM reservations res JOIN rooms r ON res.room_id = r.room_id JOIN room_types rt ON r.room_type_id = rt.room_type_id WHERE res.status != 'cancelled' GROUP BY rt.type_name ORDER BY total_revenue DESC");
+$room_type_report = $conn->query("SELECT * FROM vw_room_type_revenue_report");
 
-$payment_method_report = $conn->query("SELECT payment_method, COUNT(*) as count, SUM(amount) as total FROM payments WHERE payment_status = 'completed' GROUP BY payment_method ORDER BY total DESC");
+$payment_method_report = $conn->query("SELECT * FROM vw_payment_method_report");
 
 $daily_data = [];
 if ($daily_report && $daily_report->num_rows > 0) {

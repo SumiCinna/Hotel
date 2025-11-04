@@ -16,17 +16,17 @@ $per_page = 10;
 $offset_occupancy = ($page_occupancy - 1) * $per_page;
 $offset_rooms = ($page_rooms - 1) * $per_page;
 
-$count_occupancy = $conn->query("SELECT COUNT(*) as count FROM reservations res WHERE res.status = 'checked_in' OR (res.status = 'confirmed' AND EXISTS (SELECT 1 FROM rooms r WHERE r.room_id = res.room_id AND r.status = 'reserved'))")->fetch_assoc()['count'];
+$count_occupancy = $conn->query("SELECT * FROM vw_occupancy_count")->fetch_assoc()['count'];
 $total_pages_occupancy = ceil($count_occupancy / $per_page);
 
-$count_rooms = $conn->query("SELECT COUNT(*) as count FROM rooms")->fetch_assoc()['count'];
+$count_rooms = $conn->query("SELECT * FROM vw_rooms_count")->fetch_assoc()['count'];
 $total_pages_rooms = ceil($count_rooms / $per_page);
 
-$rooms = $conn->query("SELECT r.room_id, r.room_number, rt.type_name, rt.base_price, r.floor, r.status FROM rooms r JOIN room_types rt ON r.room_type_id = rt.room_type_id ORDER BY r.room_number LIMIT $offset_rooms, $per_page");
+$rooms = $conn->query("SELECT * FROM vw_all_rooms LIMIT $offset_rooms, $per_page");
 
-$room_stats = $conn->query("SELECT (SELECT COUNT(*) FROM rooms WHERE status = 'available') as available, (SELECT COUNT(*) FROM rooms WHERE status = 'occupied') as occupied, (SELECT COUNT(*) FROM rooms WHERE status = 'maintenance') as maintenance, (SELECT COUNT(*) FROM rooms WHERE status = 'reserved') as reserved")->fetch_assoc();
+$room_stats = $conn->query("SELECT * FROM vw_room_stats")->fetch_assoc();
 
-$current_occupancy = $conn->query("SELECT res.reservation_id, r.room_number, rt.type_name, u.full_name, u.phone, res.check_in_date, res.check_out_date FROM reservations res JOIN rooms r ON res.room_id = r.room_id JOIN room_types rt ON r.room_type_id = rt.room_type_id JOIN users u ON res.user_id = u.user_id WHERE res.status = 'checked_in' OR (res.status = 'confirmed' AND r.status = 'reserved') ORDER BY r.room_number LIMIT $offset_occupancy, $per_page");
+$current_occupancy = $conn->query("SELECT * FROM vw_current_occupancy LIMIT $offset_occupancy, $per_page");
 
 $db->close();
 ?>

@@ -26,7 +26,7 @@ $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $per_page = 5;
 $offset = ($page - 1) * $per_page;
 
-$stmt = $conn->prepare("SELECT COUNT(*) as total FROM reservations WHERE user_id = ?");
+$stmt = $conn->prepare("CALL sp_get_user_reservation_count(?)");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $total_result = $stmt->get_result();
@@ -34,27 +34,22 @@ $total_row = $total_result->fetch_assoc();
 $total_reservations = $total_row['total'];
 $total_pages = ceil($total_reservations / $per_page);
 $stmt->close();
+$conn->next_result();
 
-$stmt = $conn->prepare("
-    SELECT r.*, rm.room_number, rt.type_name 
-    FROM reservations r
-    JOIN rooms rm ON r.room_id = rm.room_id
-    JOIN room_types rt ON rm.room_type_id = rt.room_type_id
-    WHERE r.user_id = ?
-    ORDER BY r.created_at DESC
-    LIMIT ? OFFSET ?
-");
+$stmt = $conn->prepare("CALL sp_get_user_reservations_paginated(?, ?, ?)");
 $stmt->bind_param("iii", $_SESSION['user_id'], $per_page, $offset);
 $stmt->execute();
 $reservations = $stmt->get_result();
 $stmt->close();
+$conn->next_result();
 
 if (isset($_POST['cancel_reservation'])) {
     $reservation_id = $_POST['reservation_id'];
-    $stmt = $conn->prepare("UPDATE reservations SET status = 'cancelled' WHERE reservation_id = ? AND user_id = ? AND status = 'pending'");
+    $stmt = $conn->prepare("CALL sp_cancel_reservation(?, ?)");
     $stmt->bind_param("ii", $reservation_id, $_SESSION['user_id']);
     $stmt->execute();
     $stmt->close();
+    $conn->next_result();
     header('Location: dashboard.php');
     exit();
 }

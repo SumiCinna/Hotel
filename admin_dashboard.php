@@ -13,15 +13,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 $db = new Database();
 $conn = $db->getConnection();
 
-$result = $conn->query("CALL sp_get_dashboard_stats()");
-$stats = null;
-if ($result) {
-    $stats = $result->fetch_assoc();
-    $result->close();
-    $conn->next_result();
-}
-
-$users = $conn->query("SELECT user_id, username, email, full_name, phone, role, is_active, created_at FROM users ORDER BY created_at DESC LIMIT 5");
+$users = $conn->query("SELECT * FROM vw_recent_users");
 
 $db->close();
 ?>
@@ -236,74 +228,6 @@ $db->close();
             position: relative;
         }
         
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 25px;
-            margin-bottom: 35px;
-        }
-        
-        .stat-card {
-            background: white;
-            padding: 30px;
-            border-radius: 20px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 5px;
-            height: 100%;
-            background: linear-gradient(180deg, #7c3aed 0%, #6366f1 100%);
-        }
-        
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
-        }
-        
-        .stat-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 15px;
-        }
-        
-        .stat-icon {
-            width: 55px;
-            height: 55px;
-            background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
-            border-radius: 15px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 24px;
-        }
-        
-        .stat-value {
-            text-align: right;
-        }
-        
-        .stat-value h3 {
-            color: #7c3aed;
-            font-size: 36px;
-            font-weight: 700;
-            margin-bottom: 5px;
-        }
-        
-        .stat-value p {
-            color: #64748b;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        
         .section {
             background: white;
             padding: 30px;
@@ -434,16 +358,6 @@ $db->close();
             font-size: 16px;
         }
         
-        .wide-card {
-            flex: 1 1 350px;
-            min-width: 350px;
-        }
-        
-        .wide-card .stat-value h3 {
-            font-size: 28px;
-            letter-spacing: -0.5px;
-        }
-        
         @media (max-width: 768px) {
             .sidebar {
                 transform: translateX(-100%);
@@ -451,10 +365,6 @@ $db->close();
             
             .main-content {
                 margin-left: 0;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -518,77 +428,6 @@ $db->close();
                 <h2 class="playfair"><i class="fas fa-hand-wave"></i> Welcome, <?php echo htmlspecialchars($_SESSION['full_name']); ?>!</h2>
                 <p>User Access | Manage Users</p>
             </div>
-            
-            <?php if ($stats): ?>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-icon">
-                            <i class="fas fa-door-open"></i>
-                        </div>
-                        <div class="stat-value">
-                            <h3><?php echo $stats['available_rooms']; ?></h3>
-                            <p>Available Rooms</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-icon">
-                            <i class="fas fa-bed"></i>
-                        </div>
-                        <div class="stat-value">
-                            <h3><?php echo $stats['occupied_rooms']; ?></h3>
-                            <p>Occupied Rooms</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-icon">
-                            <i class="fas fa-clock"></i>
-                        </div>
-                        <div class="stat-value">
-                            <h3><?php echo $stats['pending_reservations']; ?></h3>
-                            <p>Pending Reservations</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-header">
-                        <div class="stat-icon">
-                            <i class="fas fa-check-circle"></i>
-                        </div>
-                        <div class="stat-value">
-                            <h3><?php echo $stats['confirmed_reservations']; ?></h3>
-                            <p>Confirmed Reservations</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="stat-card wide-card">
-                    <div class="stat-header">
-                        <div class="stat-icon">
-                            <i class="fas fa-peso-sign"></i>
-                        </div>
-                        <div class="stat-value">
-                            <h3>₱<?php echo number_format($stats['today_revenue'], 2); ?></h3>
-                            <p>Today's Revenue</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="stat-card wide-card">
-                    <div class="stat-header">
-                        <div class="stat-icon">
-                            <i class="fas fa-chart-line"></i>
-                        </div>
-                        <div class="stat-value">
-                            <h3>₱<?php echo number_format($stats['month_revenue'], 2); ?></h3>
-                            <p>This Month's Revenue</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <?php endif; ?>
             
             <div class="section">
                 <div class="section-header">

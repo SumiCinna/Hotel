@@ -18,18 +18,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $new_status = $_POST['status'];
     $room_id = $_POST['room_id'];
     
-    $update_stmt = $conn->prepare("UPDATE reservations SET status = ? WHERE reservation_id = ?");
-    $update_stmt->bind_param("si", $new_status, $reservation_id);
+    $update_stmt = $conn->prepare("CALL sp_update_reservation_status(?, ?)");
+    $update_stmt->bind_param("is", $reservation_id, $new_status);
     $update_stmt->execute();
+    $update_stmt->close();
     
     if ($new_status === 'checked_in') {
-        $room_update = $conn->prepare("UPDATE rooms SET status = 'occupied' WHERE room_id = ?");
+        $room_update = $conn->prepare("CALL sp_update_room_status(?, 'occupied')");
         $room_update->bind_param("i", $room_id);
         $room_update->execute();
+        $room_update->close();
     } elseif ($new_status === 'checked_out' || $new_status === 'cancelled') {
-        $room_update = $conn->prepare("UPDATE rooms SET status = 'available' WHERE room_id = ?");
+        $room_update = $conn->prepare("CALL sp_update_room_status(?, 'available')");
         $room_update->bind_param("i", $room_id);
         $room_update->execute();
+        $room_update->close();
     }
     
     $_SESSION['success'] = "Reservation status updated successfully!";
@@ -43,36 +46,18 @@ $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $per_page = 10;
 $offset = ($page - 1) * $per_page;
 
-$where_clause = "1=1";
-if ($filter !== 'all') {
-    $where_clause .= " AND res.status = '" . $conn->real_escape_string($filter) . "'";
-}
-if (!empty($search)) {
-    $search_term = $conn->real_escape_string($search);
-    $where_clause .= " AND (u.full_name LIKE '%$search_term%' OR u.phone LIKE '%$search_term%' OR r.room_number LIKE '%$search_term%' OR res.reservation_id LIKE '%$search_term%')";
-}
-
-$count_query = "SELECT COUNT(*) as count 
-                FROM reservations res 
-                JOIN users u ON res.user_id = u.user_id 
-                JOIN rooms r ON res.room_id = r.room_id 
-                JOIN room_types rt ON r.room_type_id = rt.room_type_id 
-                WHERE $where_clause";
-$count_result = $conn->query($count_query);
+$count_stmt = $conn->prepare("CALL sp_get_reservations_count(?, ?)");
+$count_stmt->bind_param("ss", $filter, $search);
+$count_stmt->execute();
+$count_result = $count_stmt->get_result();
 $total_count = $count_result->fetch_assoc()['count'];
 $total_pages = ceil($total_count / $per_page);
+$count_stmt->close();
 
-$query = "SELECT res.reservation_id, res.room_id, u.full_name, u.phone, u.email, r.room_number, rt.type_name, 
-          res.check_in_date, res.check_out_date, res.total_amount, res.status, res.created_at, res.special_requests 
-          FROM reservations res 
-          JOIN users u ON res.user_id = u.user_id 
-          JOIN rooms r ON res.room_id = r.room_id 
-          JOIN room_types rt ON r.room_type_id = rt.room_type_id 
-          WHERE $where_clause 
-          ORDER BY res.created_at DESC
-          LIMIT $offset, $per_page";
-
-$reservations = $conn->query($query);
+$stmt = $conn->prepare("CALL sp_get_reservations(?, ?, ?, ?)");
+$stmt->bind_param("ssii", $filter, $search, $offset, $per_page);
+$stmt->execute();
+$reservations = $stmt->get_result();
 
 if (!$reservations) {
     die("Query Error: " . $conn->error);

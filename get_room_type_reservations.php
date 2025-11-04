@@ -12,15 +12,7 @@ if ($room_type_id <= 0) {
 $db = new Database();
 $conn = $db->getConnection();
 
-$stmt = $conn->prepare("
-    SELECT DISTINCT r.check_in_date, r.check_out_date, r.status
-    FROM reservations r
-    JOIN rooms rm ON r.room_id = rm.room_id
-    WHERE rm.room_type_id = ? 
-    AND r.status IN ('pending', 'confirmed', 'checked_in')
-    AND r.check_out_date >= CURDATE()
-    ORDER BY r.check_in_date ASC
-");
+$stmt = $conn->prepare("CALL sp_get_room_type_reservations(?)");
 $stmt->bind_param("i", $room_type_id);
 $stmt->execute();
 $result = $stmt->get_result();

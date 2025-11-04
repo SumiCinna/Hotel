@@ -18,32 +18,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $room_number = trim($_POST['room_number']);
         $room_type_id = $_POST['room_type_id'];
         $floor = $_POST['floor'];
-        $status = 'available';
         
         if (!preg_match('/^\d{1,3}$/', $room_number)) {
             $_SESSION['error'] = "Room number must be 1-3 digits only!";
         } elseif (!preg_match('/^\d{1,3}$/', $floor)) {
             $_SESSION['error'] = "Floor must be 1-3 digits only!";
         } else {
-            $check_stmt = $conn->prepare("SELECT room_id FROM rooms WHERE room_number = ?");
-            $check_stmt->bind_param("s", $room_number);
-            $check_stmt->execute();
-            $result = $check_stmt->get_result();
+            $stmt = $conn->prepare("CALL sp_add_room(?, ?, ?, @result)");
+            $stmt->bind_param("sis", $room_number, $room_type_id, $floor);
+            $stmt->execute();
+            $stmt->close();
             
-            if ($result->num_rows > 0) {
-                $_SESSION['error'] = "Room number already exists!";
+            $result = $conn->query("SELECT @result as result");
+            $row = $result->fetch_assoc();
+            $message = $row['result'];
+            
+            if (strpos($message, 'SUCCESS:') === 0) {
+                $_SESSION['success'] = substr($message, 8);
             } else {
-                $insert_stmt = $conn->prepare("INSERT INTO rooms (room_number, room_type_id, floor, status, is_archived) VALUES (?, ?, ?, ?, 0)");
-                $insert_stmt->bind_param("ssis", $room_number, $room_type_id, $floor, $status);
-                
-                if ($insert_stmt->execute()) {
-                    $_SESSION['success'] = "Room added successfully!";
-                } else {
-                    $_SESSION['error'] = "Error adding room: " . $insert_stmt->error;
-                }
-                $insert_stmt->close();
+                $_SESSION['error'] = substr($message, 6);
             }
-            $check_stmt->close();
         }
     } elseif (isset($_POST['action']) && $_POST['action'] === 'add_room_type') {
         $type_name = trim($_POST['type_name']);
@@ -90,146 +84,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             if (!isset($_SESSION['error'])) {
-                $check_type = $conn->prepare("SELECT room_type_id FROM room_types WHERE type_name = ?");
-                $check_type->bind_param("s", $type_name);
-                $check_type->execute();
-                $type_result = $check_type->get_result();
+                $stmt = $conn->prepare("CALL sp_add_room_type(?, ?, ?, ?, ?, @result)");
+                $stmt->bind_param("ssdis", $type_name, $description, $base_price, $max_occupancy, $image_path);
+                $stmt->execute();
+                $stmt->close();
                 
-                if ($type_result->num_rows > 0) {
-                    $_SESSION['error'] = "Room type already exists!";
+                $result = $conn->query("SELECT @result as result");
+                $row = $result->fetch_assoc();
+                $message = $row['result'];
+                
+                if (strpos($message, 'SUCCESS:') === 0) {
+                    $_SESSION['success'] = substr($message, 8);
+                } else {
+                    $_SESSION['error'] = substr($message, 6);
                     if ($image_path && file_exists($image_path)) {
                         unlink($image_path);
                     }
-                } else {
-                    $insert_type = $conn->prepare("INSERT INTO room_types (type_name, description, base_price, max_occupancy, image_path, is_archived) VALUES (?, ?, ?, ?, ?, 0)");
-                    $insert_type->bind_param("ssdis", $type_name, $description, $base_price, $max_occupancy, $image_path);
-                    
-                    if ($insert_type->execute()) {
-                        $_SESSION['success'] = "Room type added successfully!";
-                    } else {
-                        $_SESSION['error'] = "Error adding room type: " . $insert_type->error;
-                        if ($image_path && file_exists($image_path)) {
-                            unlink($image_path);
-                        }
-                    }
-                    $insert_type->close();
                 }
-                $check_type->close();
             }
         }
     } elseif (isset($_POST['action']) && $_POST['action'] === 'archive_room') {
         $room_id = $_POST['room_id'];
         $is_archived = $_POST['is_archived'];
         
-        if ($is_archived == 1) {
-            $check_reserved = $conn->prepare("SELECT room_id FROM rooms WHERE room_id = ? AND (status = 'reserved' OR status = 'occupied')");
-            $check_reserved->bind_param("i", $room_id);
-            $check_reserved->execute();
-            $reserved_result = $check_reserved->get_result();
-            
-            if ($reserved_result->num_rows > 0) {
-                $_SESSION['error'] = "Cannot archive a reserved or occupied room!";
-            } else {
-                $update_room = $conn->prepare("UPDATE rooms SET is_archived = ? WHERE room_id = ?");
-                $update_room->bind_param("ii", $is_archived, $room_id);
-                
-                if ($update_room->execute()) {
-                    $_SESSION['success'] = "Room archived successfully!";
-                } else {
-                    $_SESSION['error'] = "Error archiving room!";
-                }
-                $update_room->close();
-            }
-            $check_reserved->close();
+        $stmt = $conn->prepare("CALL sp_archive_room(?, ?, @result)");
+        $stmt->bind_param("ii", $room_id, $is_archived);
+        $stmt->execute();
+        $stmt->close();
+        
+        $result = $conn->query("SELECT @result as result");
+        $row = $result->fetch_assoc();
+        $message = $row['result'];
+        
+        if (strpos($message, 'SUCCESS:') === 0) {
+            $_SESSION['success'] = substr($message, 8);
         } else {
-            $update_room = $conn->prepare("UPDATE rooms SET is_archived = ? WHERE room_id = ?");
-            $update_room->bind_param("ii", $is_archived, $room_id);
-            
-            if ($update_room->execute()) {
-                $_SESSION['success'] = "Room restored successfully!";
-            } else {
-                $_SESSION['error'] = "Error restoring room!";
-            }
-            $update_room->close();
+            $_SESSION['error'] = substr($message, 6);
         }
     } elseif (isset($_POST['action']) && $_POST['action'] === 'archive_room_type') {
         $room_type_id = $_POST['room_type_id'];
         $is_archived = $_POST['is_archived'];
         
-        if ($is_archived == 1) {
-            $check_reserved = $conn->prepare("SELECT r.room_id FROM rooms r WHERE r.room_type_id = ? AND (r.status = 'reserved' OR r.status = 'occupied') AND r.is_archived = 0");
-            $check_reserved->bind_param("i", $room_type_id);
-            $check_reserved->execute();
-            $reserved_result = $check_reserved->get_result();
-            
-            if ($reserved_result->num_rows > 0) {
-                $_SESSION['error'] = "Cannot archive room type with reserved or occupied rooms!";
-            } else {
-                $conn->begin_transaction();
-                
-                try {
-                    $update_rooms = $conn->prepare("UPDATE rooms SET is_archived = 1 WHERE room_type_id = ? AND is_archived = 0");
-                    $update_rooms->bind_param("i", $room_type_id);
-                    $update_rooms->execute();
-                    $update_rooms->close();
-                    
-                    $update_type = $conn->prepare("UPDATE room_types SET is_archived = 1 WHERE room_type_id = ?");
-                    $update_type->bind_param("i", $room_type_id);
-                    $update_type->execute();
-                    $update_type->close();
-                    
-                    $conn->commit();
-                    $_SESSION['success'] = "Room type and its rooms archived successfully!";
-                } catch (Exception $e) {
-                    $conn->rollback();
-                    $_SESSION['error'] = "Error archiving room type!";
-                }
-            }
-            $check_reserved->close();
+        $stmt = $conn->prepare("CALL sp_archive_room_type(?, ?, @result)");
+        $stmt->bind_param("ii", $room_type_id, $is_archived);
+        $stmt->execute();
+        $stmt->close();
+        
+        $result = $conn->query("SELECT @result as result");
+        $row = $result->fetch_assoc();
+        $message = $row['result'];
+        
+        if (strpos($message, 'SUCCESS:') === 0) {
+            $_SESSION['success'] = substr($message, 8);
         } else {
-            $conn->begin_transaction();
-            
-            try {
-                $update_type = $conn->prepare("UPDATE room_types SET is_archived = 0 WHERE room_type_id = ?");
-                $update_type->bind_param("i", $room_type_id);
-                $update_type->execute();
-                $update_type->close();
-                
-                $update_rooms = $conn->prepare("UPDATE rooms SET is_archived = 0 WHERE room_type_id = ? AND is_archived = 1");
-                $update_rooms->bind_param("i", $room_type_id);
-                $update_rooms->execute();
-                $update_rooms->close();
-                
-                $conn->commit();
-                $_SESSION['success'] = "Room type and its rooms restored successfully!";
-            } catch (Exception $e) {
-                $conn->rollback();
-                $_SESSION['error'] = "Error restoring room type!";
-            }
+            $_SESSION['error'] = substr($message, 6);
         }
     } elseif (isset($_POST['action']) && $_POST['action'] === 'maintenance') {
         $room_id = $_POST['room_id'];
         $maintenance_status = $_POST['maintenance_status'];
         
-        $check_reserved = $conn->prepare("SELECT room_id FROM rooms WHERE room_id = ? AND (status = 'reserved' OR status = 'occupied')");
-        $check_reserved->bind_param("i", $room_id);
-        $check_reserved->execute();
-        $reserved_result = $check_reserved->get_result();
+        $stmt = $conn->prepare("CALL sp_update_room_status(?, ?, @result)");
+        $stmt->bind_param("is", $room_id, $maintenance_status);
+        $stmt->execute();
+        $stmt->close();
         
-        if ($reserved_result->num_rows > 0) {
-            $_SESSION['error'] = "Cannot update status of a reserved or occupied room!";
+        $result = $conn->query("SELECT @result as result");
+        $row = $result->fetch_assoc();
+        $message = $row['result'];
+        
+        if (strpos($message, 'SUCCESS:') === 0) {
+            $_SESSION['success'] = substr($message, 8);
         } else {
-            $update_stmt = $conn->prepare("UPDATE rooms SET status = ? WHERE room_id = ?");
-            $update_stmt->bind_param("si", $maintenance_status, $room_id);
-            
-            if ($update_stmt->execute()) {
-                $_SESSION['success'] = "Room status updated successfully!";
-            } else {
-                $_SESSION['error'] = "Error updating room status!";
-            }
-            $update_stmt->close();
+            $_SESSION['error'] = substr($message, 6);
         }
-        $check_reserved->close();
     }
     
     header("Location: add_rooms.php");
@@ -240,14 +167,14 @@ $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $per_page = 10;
 $offset = ($page - 1) * $per_page;
 
-$total_rooms_result = $conn->query("SELECT COUNT(*) as count FROM rooms WHERE is_archived = 0");
+$total_rooms_result = $conn->query("SELECT count FROM vw_room_count");
 $total_rooms_row = $total_rooms_result->fetch_assoc();
 $total_rooms = $total_rooms_row['count'];
 $total_pages = ceil($total_rooms / $per_page);
 
-$rooms = $conn->query("SELECT r.room_id, r.room_number, rt.type_name, r.floor, r.status FROM rooms r JOIN room_types rt ON r.room_type_id = rt.room_type_id WHERE r.is_archived = 0 ORDER BY r.room_number LIMIT $offset, $per_page");
+$rooms = $conn->query("SELECT room_id, room_number, type_name, floor, status FROM vw_active_rooms LIMIT $offset, $per_page");
 
-$room_types = $conn->query("SELECT room_type_id, type_name, description, base_price, max_occupancy FROM room_types ORDER BY type_name");
+$room_types = $conn->query("SELECT room_type_id, type_name, description, base_price, max_occupancy FROM vw_all_room_types ORDER BY type_name");
 
 $db->close();
 ?>
@@ -355,7 +282,7 @@ $db->close();
                                 <?php 
                                 $db_temp = new Database();
                                 $conn_temp = $db_temp->getConnection();
-                                $room_types_reset = $conn_temp->query("SELECT room_type_id, type_name FROM room_types WHERE is_archived = 0");
+                                $room_types_reset = $conn_temp->query("SELECT room_type_id, type_name FROM vw_active_room_types");
                                 while ($type = $room_types_reset->fetch_assoc()): ?>
                                 <option value="<?php echo $type['room_type_id']; ?>"><?php echo htmlspecialchars($type['type_name']); ?></option>
                                 <?php endwhile;
@@ -484,7 +411,7 @@ $db->close();
         let allActiveRooms = <?php 
             $db = new Database();
             $conn = $db->getConnection();
-            $active_result = $conn->query("SELECT r.room_id, r.room_number, rt.type_name, r.floor, r.status FROM rooms r JOIN room_types rt ON r.room_type_id = rt.room_type_id WHERE r.is_archived = 0 ORDER BY r.room_number");
+            $active_result = $conn->query("SELECT room_id, room_number, type_name, floor, status FROM vw_active_rooms");
             $active_data = [];
             while ($row = $active_result->fetch_assoc()) {
                 $active_data[] = $row;
@@ -493,7 +420,7 @@ $db->close();
         ?>;
         
         let allArchivedRooms = <?php 
-            $archived_result = $conn->query("SELECT r.room_id, r.room_number, rt.type_name, r.floor, r.status FROM rooms r JOIN room_types rt ON r.room_type_id = rt.room_type_id WHERE r.is_archived = 1 ORDER BY r.room_number");
+            $archived_result = $conn->query("SELECT room_id, room_number, type_name, floor, status FROM vw_archived_rooms");
             $archived_data = [];
             while ($row = $archived_result->fetch_assoc()) {
                 $archived_data[] = $row;
@@ -502,7 +429,7 @@ $db->close();
         ?>;
 
         let allActiveRoomTypes = <?php 
-            $active_types_result = $conn->query("SELECT room_type_id, type_name, description, base_price, max_occupancy FROM room_types WHERE is_archived = 0 ORDER BY type_name");
+            $active_types_result = $conn->query("SELECT room_type_id, type_name, description, base_price, max_occupancy FROM vw_active_room_types");
             $active_types_data = [];
             while ($row = $active_types_result->fetch_assoc()) {
                 $active_types_data[] = $row;
@@ -511,7 +438,7 @@ $db->close();
         ?>;
 
         let allArchivedRoomTypes = <?php 
-            $archived_types_result = $conn->query("SELECT room_type_id, type_name, description, base_price, max_occupancy FROM room_types WHERE is_archived = 1 ORDER BY type_name");
+            $archived_types_result = $conn->query("SELECT room_type_id, type_name, description, base_price, max_occupancy FROM vw_archived_room_types");
             $archived_types_data = [];
             while ($row = $archived_types_result->fetch_assoc()) {
                 $archived_types_data[] = $row;

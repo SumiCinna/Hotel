@@ -19,7 +19,7 @@ $room_id = $_GET['id'];
 $db = new Database();
 $conn = $db->getConnection();
 
-$stmt = $conn->prepare("SELECT r.room_id, r.room_number, rt.type_name, r.floor, r.status, rt.price_per_night, rt.capacity FROM rooms r JOIN room_types rt ON r.type_id = rt.type_id WHERE r.room_id = ?");
+$stmt = $conn->prepare("SELECT * FROM vw_room_detail_by_id WHERE room_id = ?");
 $stmt->bind_param("i", $room_id);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -36,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['status'])) {
     $allowed_statuses = ['available', 'occupied', 'maintenance'];
     
     if (in_array($new_status, $allowed_statuses)) {
-        $update_stmt = $conn->prepare("UPDATE rooms SET status = ? WHERE room_id = ?");
+        $update_stmt = $conn->prepare("CALL sp_update_room_status(?, ?)");
         $update_stmt->bind_param("si", $new_status, $room_id);
         $update_stmt->execute();
         
