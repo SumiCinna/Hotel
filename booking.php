@@ -97,11 +97,13 @@ function getDisabledDatesJson($reserved_dates) {
     $disabled_dates = [];
     
     foreach ($reserved_dates as $reservation) {
-        $start = strtotime($reservation['check_in']);
-        $end = strtotime($reservation['check_out']);
-        
-        for ($date = $start; $date < $end; $date = strtotime('+1 day', $date)) {
-            $disabled_dates[] = date('Y-m-d', $date);
+        if ($reservation['status'] === 'confirmed' || $reservation['status'] === 'checked_in') {
+            $start = strtotime($reservation['check_in']);
+            $end = strtotime($reservation['check_out']);
+            
+            for ($date = $start; $date < $end; $date = strtotime('+1 day', $date)) {
+                $disabled_dates[] = date('Y-m-d', $date);
+            }
         }
     }
     
@@ -219,6 +221,10 @@ $db->close();
                     while($room = $all_rooms->fetch_assoc()): 
                         $reserved_dates = getReservedDates($conn_temp, $room['room_id']);
                         $disabled_dates_json = getDisabledDatesJson($reserved_dates);
+                        
+                        $active_reservations = array_filter($reserved_dates, function($res) {
+                            return $res['status'] === 'confirmed' || $res['status'] === 'checked_in';
+                        });
                     ?>
                         <div class="room-card">
                             <h3>
@@ -246,9 +252,9 @@ $db->close();
                             
                             <div class="reserved-dates">
                                 <h4><i class="fas fa-calendar-times"></i> Reserved Dates</h4>
-                                <?php if(count($reserved_dates) > 0): ?>
+                                <?php if(count($active_reservations) > 0): ?>
                                     <ul>
-                                        <?php foreach($reserved_dates as $reservation): ?>
+                                        <?php foreach($active_reservations as $reservation): ?>
                                             <li>
                                                 <i class="fas fa-circle"></i>
                                                 <?php echo date('M d, Y', strtotime($reservation['check_in'])); ?> - <?php echo date('M d, Y', strtotime($reservation['check_out'])); ?>
@@ -320,10 +326,8 @@ $db->close();
                                 </button>
                             </form>
                         </div>
-                    <?php 
-                    endwhile; 
-                    $db_temp->close();
-                    ?>
+                    <?php endwhile; ?>
+                    <?php $db_temp->close(); ?>
                 </div>
             <?php else: ?>
                 <div class="empty-state">
