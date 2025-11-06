@@ -15,7 +15,7 @@ $db = new Database();
 $conn = $db->getConnection();
 
 $room_id = intval($_GET['room_id']);
-$result = $conn->query("SELECT status FROM rooms WHERE room_id = $room_id");
+$result = $conn->query("SELECT * FROM vw_room_status_check WHERE room_id = $room_id");
 
 if ($result && $result->num_rows > 0) {
     $room = $result->fetch_assoc();

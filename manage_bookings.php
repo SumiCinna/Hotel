@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $room_id = $_POST['room_id'];
     
     if ($new_status === 'checked_in') {
-        $check_room = $conn->query("SELECT status FROM rooms WHERE room_id = $room_id");
+        $check_room = $conn->query("SELECT * FROM vw_manage_booking_room_check WHERE room_id = $room_id");
         $room_data = $check_room->fetch_assoc();
         
         if ($room_data['status'] === 'maintenance') {
