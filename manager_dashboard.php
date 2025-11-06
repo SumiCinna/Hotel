@@ -16,17 +16,21 @@ $conn = $db->getConnection();
 $today_revenue = 0;
 $month_revenue = 0;
 
-$today_result = $conn->query("SELECT * FROM vw_today_revenue");
-if ($today_result && $row = $today_result->fetch_assoc()) {
+
+$daily_report_result = $conn->query("SELECT * FROM vw_daily_revenue_report WHERE date = CURDATE()");
+if ($daily_report_result && $row = $daily_report_result->fetch_assoc()) {
     $today_revenue = $row['revenue'] ?? 0;
 }
 
-$month_result = $conn->query("SELECT * FROM vw_month_revenue");
-if ($month_result && $row = $month_result->fetch_assoc()) {
+
+$current_month = date('Y-m');
+$monthly_report_result = $conn->query("SELECT * FROM vw_monthly_revenue_report WHERE month = '$current_month'");
+if ($monthly_report_result && $row = $monthly_report_result->fetch_assoc()) {
     $month_revenue = $row['revenue'] ?? 0;
 }
 
-$monthly_report = $conn->query("SELECT * FROM vw_monthly_report");
+
+$monthly_report = $conn->query("SELECT * FROM vw_monthly_revenue_report ORDER BY month DESC LIMIT 12");
 
 $db->close();
 ?>

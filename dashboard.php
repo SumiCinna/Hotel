@@ -54,6 +54,20 @@ if (isset($_POST['cancel_reservation'])) {
     exit();
 }
 
+$receipt_data = null;
+if (isset($_GET['view_receipt']) && isset($_GET['id'])) {
+    $receipt_id = intval($_GET['id']);
+    $stmt = $conn->prepare("SELECT * FROM vw_reservation_receipts WHERE reservation_id = ? AND user_id = ?");
+    
+    if ($stmt) {
+        $stmt->bind_param("ii", $receipt_id, $_SESSION['user_id']);
+        $stmt->execute();
+        $receipt_result = $stmt->get_result();
+        $receipt_data = $receipt_result->fetch_assoc();
+        $stmt->close();
+    }
+}
+
 $db->close();
 ?>
 <!DOCTYPE html>
@@ -65,6 +79,7 @@ $db->close();
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/dashboard.css">
+    
 </head>
 <body>
     <div class="sidebar">
@@ -127,6 +142,12 @@ $db->close();
         </div>
         
         <div class="container">
+            <?php if (isset($_GET['payment_success'])): ?>
+            <div class="success" style="margin-bottom: 20px;">
+                Payment submitted successfully! Your reservation is now pending approval from staff.
+            </div>
+            <?php endif; ?>
+            
             <div class="welcome-card">
                 <h2 class="playfair"><i class="fas fa-hand-wave"></i> Welcome, <?php echo htmlspecialchars($_SESSION['full_name']); ?>!</h2>
                 <p>Manage your reservations and bookings</p>
@@ -221,6 +242,11 @@ $db->close();
                                                 <i class="fas fa-times"></i>
                                                 Cancel
                                             </button>
+                                        <?php elseif ($row['status'] === 'confirmed'): ?>
+                                            <a href="?view_receipt=1&id=<?php echo $row['reservation_id']; ?>" class="btn btn-small">
+                                                <i class="fas fa-receipt"></i>
+                                                View Receipt
+                                            </a>
                                         <?php endif; ?>
                                     </div>
                                 </td>
@@ -298,6 +324,112 @@ $db->close();
         </div>
     </div>
 
+    <?php if (isset($receipt_data) && $receipt_data): 
+        $nights = (strtotime($receipt_data['check_out_date']) - strtotime($receipt_data['check_in_date'])) / (60 * 60 * 24);
+        $change = $receipt_data['amount'] - $receipt_data['total_amount'];
+    ?>
+    <div id="receiptModal" class="modal show">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Payment Receipt</h2>
+            </div>
+            <div class="modal-body">
+                <div class="receipt">
+                    <div class="receipt-header">
+                        <h1>LUXESTAY HOTEL</h1>
+                        <p>Official Payment Receipt</p>
+                        <p style="margin-top: 10px;"><span class="status-badge">PAID</span></p>
+                    </div>
+
+                    <div class="receipt-info">
+                        <div class="info-section">
+                            <h3>Guest Information</h3>
+                            <div class="info-row">
+                                <span class="info-label">Name:</span>
+                                <span class="info-value"><?php echo htmlspecialchars($receipt_data['full_name']); ?></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Email:</span>
+                                <span class="info-value"><?php echo htmlspecialchars($receipt_data['email']); ?></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Phone:</span>
+                                <span class="info-value"><?php echo htmlspecialchars($receipt_data['phone']); ?></span>
+                            </div>
+                        </div>
+
+                        <div class="info-section">
+                            <h3>Payment Information</h3>
+                            <div class="info-row">
+                                <span class="info-label">Transaction ID:</span>
+                                <span class="info-value"><?php echo htmlspecialchars($receipt_data['transaction_id']); ?></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Payment Date:</span>
+                                <span class="info-value"><?php echo date('M d, Y h:i A', strtotime($receipt_data['payment_date'])); ?></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Payment Method:</span>
+                                <span class="info-value"><?php echo ucwords(str_replace('_', ' ', htmlspecialchars($receipt_data['payment_method']))); ?></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <table class="receipt-table">
+                        <thead>
+                            <tr>
+                                <th>Description</th>
+                                <th>Details</th>
+                                <th style="text-align: right;">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <strong>Room Reservation</strong><br>
+                                    <small>Reservation #<?php echo $receipt_data['reservation_id']; ?></small>
+                                </td>
+                                <td>
+                                    Room <?php echo htmlspecialchars($receipt_data['room_number']); ?> - <?php echo htmlspecialchars($receipt_data['type_name']); ?><br>
+                                    <small><?php echo date('M d, Y', strtotime($receipt_data['check_in_date'])); ?> to <?php echo date('M d, Y', strtotime($receipt_data['check_out_date'])); ?></small><br>
+                                    <small><?php echo $nights; ?> night(s)</small>
+                                </td>
+                                <td style="text-align: right;">₱<?php echo number_format($receipt_data['total_amount'], 2); ?></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="receipt-total">
+                        <div class="total-row">
+                            <span>Total Amount:</span>
+                            <span>₱<?php echo number_format($receipt_data['total_amount'], 2); ?></span>
+                        </div>
+                        <div class="total-row">
+                            <span>Amount Paid:</span>
+                            <span>₱<?php echo number_format($receipt_data['amount'], 2); ?></span>
+                        </div>
+                        <div class="total-row">
+                            <span>Change:</span>
+                            <span>₱<?php echo number_format($change, 2); ?></span>
+                        </div>
+                    </div>
+
+                    <div class="receipt-footer">
+                        <p>Thank you for your payment!</p>
+                        <p>This is an official receipt. Please keep for your records.</p>
+                        <p style="margin-top: 10px;">For inquiries, please contact our front desk.</p>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button onclick="printReceipt()" class="btn-print">🖨️ Print Receipt</button>
+                        <button onclick="closeReceipt()" class="btn-close">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <script>
         let currentNotifPage = 1;
         const userId = <?php echo $_SESSION['user_id']; ?>;
@@ -317,6 +449,14 @@ $db->close();
 
         function closeCancelModal() {
             document.getElementById('cancelModal').style.display = 'none';
+        }
+
+        function printReceipt() {
+            window.print();
+        }
+
+        function closeReceipt() {
+            window.location.href = 'dashboard.php';
         }
 
         window.onclick = function(event) {
@@ -366,13 +506,14 @@ $db->close();
                     });
                     
                     if (data.total_pages > 1) {
+                        const maxPages = Math.min(data.total_pages, 5);
                         html += '<div class="pagination">';
                         
                         if (page > 1) {
-                            html += `<a href="#" onclick="loadNotifications(${page - 1}); return false;"><i class="fas fa-chevron-left"></i> Previous</a>`;
+                            html += `<a href="#" onclick="loadNotifications(${page - 1}); return false;"><i class="fas fa-chevron-left"></i></a>`;
                         }
                         
-                        for (let i = 1; i <= data.total_pages; i++) {
+                        for (let i = 1; i <= maxPages; i++) {
                             if (i === page) {
                                 html += `<span class="active">${i}</span>`;
                             } else {
@@ -380,8 +521,8 @@ $db->close();
                             }
                         }
                         
-                        if (page < data.total_pages) {
-                            html += `<a href="#" onclick="loadNotifications(${page + 1}); return false;">Next <i class="fas fa-chevron-right"></i></a>`;
+                        if (page < maxPages) {
+                            html += `<a href="#" onclick="loadNotifications(${page + 1}); return false;"><i class="fas fa-chevron-right"></i></a>`;
                         }
                         
                         html += '</div>';

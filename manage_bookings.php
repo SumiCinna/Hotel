@@ -18,19 +18,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $new_status = $_POST['status'];
     $room_id = $_POST['room_id'];
     
+    if ($new_status === 'checked_in') {
+        $check_room = $conn->query("SELECT status FROM rooms WHERE room_id = $room_id");
+        $room_data = $check_room->fetch_assoc();
+        
+        if ($room_data['status'] === 'maintenance') {
+            $_SESSION['error'] = "Cannot check in! This room is currently under maintenance.";
+            header("Location: manage_bookings.php");
+            exit();
+        }
+    }
+    
     $update_stmt = $conn->prepare("CALL sp_update_reservation_status(?, ?)");
     $update_stmt->bind_param("is", $reservation_id, $new_status);
     $update_stmt->execute();
     $update_stmt->close();
     
     if ($new_status === 'checked_in') {
-        $room_update = $conn->prepare("CALL sp_update_room_status(?, 'occupied')");
-        $room_update->bind_param("i", $room_id);
+        $status = 'occupied';
+        $room_update = $conn->prepare("CALL sp_update_room_status(?, ?, @result)");
+        $room_update->bind_param("is", $room_id, $status);
         $room_update->execute();
         $room_update->close();
     } elseif ($new_status === 'checked_out' || $new_status === 'cancelled') {
-        $room_update = $conn->prepare("CALL sp_update_room_status(?, 'available')");
-        $room_update->bind_param("i", $room_id);
+        $status = 'available';
+        $room_update = $conn->prepare("CALL sp_update_room_status(?, ?, @result)");
+        $room_update->bind_param("is", $room_id, $status);
         $room_update->execute();
         $room_update->close();
     }
@@ -203,6 +216,13 @@ $db->close();
             </div>
             <?php endif; ?>
             
+            <?php if (isset($_SESSION['error'])): ?>
+            <div class="alert alert-error">
+                <i class="fas fa-exclamation-circle"></i>
+                <span><?php echo $_SESSION['error']; unset($_SESSION['error']); ?></span>
+            </div>
+            <?php endif; ?>
+            
             <div class="section">
                 <div class="section-header">
                     <h3 class="playfair"><i class="fas fa-calendar-check"></i> All Reservations</h3>
@@ -280,7 +300,8 @@ $db->close();
                                         <input type="hidden" name="reservation_id" value="<?php echo $res['reservation_id']; ?>">
                                         <input type="hidden" name="room_id" value="<?php echo $res['room_id']; ?>">
                                         <input type="hidden" name="update_status" value="1">
-                                        <select name="status" class="status-select" onchange="this.form.submit()">
+                                        <input type="hidden" name="current_status" value="<?php echo $res['status']; ?>">
+                                        <select name="status" class="status-select" data-current="<?php echo $res['status']; ?>" onchange="checkRoomStatus(this)">
                                             <option value="pending" <?php echo $res['status'] === 'pending' ? 'selected' : ''; ?>>Pending</option>
                                             <option value="confirmed" <?php echo $res['status'] === 'confirmed' ? 'selected' : ''; ?>>Confirmed</option>
                                             <option value="checked_in" <?php echo $res['status'] === 'checked_in' ? 'selected' : ''; ?>>Checked In</option>
@@ -338,5 +359,33 @@ $db->close();
             </div>
         </div>
     </div>
+    
+    <script>
+    function checkRoomStatus(selectElement) {
+        const form = selectElement.form;
+        const roomId = form.querySelector('input[name="room_id"]').value;
+        const newStatus = selectElement.value;
+        const currentStatus = selectElement.getAttribute('data-current');
+        
+        if (newStatus === 'checked_in') {
+            fetch('check_room_status.php?room_id=' + roomId)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'maintenance') {
+                        alert('Cannot check in! This room is currently under maintenance.');
+                        selectElement.value = currentStatus;
+                    } else {
+                        form.submit();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    form.submit();
+                });
+        } else {
+            form.submit();
+        }
+    }
+    </script>
 </body>
 </html>

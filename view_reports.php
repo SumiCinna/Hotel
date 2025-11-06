@@ -372,8 +372,11 @@ $db->close();
             new Chart(document.getElementById('monthlyChart'), {
                 type: 'bar',
                 data: {
-                    labels: monthlyData.map(d => new Date(d.month + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' })),
-                    datasets: [{
+                        labels: monthlyData.map(d => {
+                        const date = new Date(d.month + '-01');
+                        return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                    }),                    
+                        datasets: [{
                         label: 'Revenue',
                         data: monthlyData.map(d => parseFloat(d.revenue)),
                         backgroundColor: '#8b5cf6',

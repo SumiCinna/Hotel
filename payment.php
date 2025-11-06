@@ -30,63 +30,51 @@ $stmt->close();
 
 $error = '';
 $success = '';
-$show_receipt = false;
-$payment_data = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $payment_method = $_POST['payment_method'];
-    $amount = $reservation['total_amount'];
+    $amount_paid = floatval($_POST['amount_paid']);
+    $total_amount = $reservation['total_amount'];
     $transaction_id = 'TXN' . time() . rand(1000, 9999);
     
-    $conn->begin_transaction();
-    
-    try {
-        $stmt = $conn->prepare("CALL sp_insert_payment(?, ?, ?, ?)");
+    if ($amount_paid < $total_amount) {
+        $error = 'Insufficient payment amount. Please pay at least ₱' . number_format($total_amount, 2);
+    } else {
+        $change = $amount_paid - $total_amount;
         
-        if (!$stmt) {
-            throw new Exception("Prepare failed: " . $conn->error);
+        $conn->begin_transaction();
+        
+        try {
+            $stmt = $conn->prepare("CALL sp_insert_payment(?, ?, ?, ?)");
+            
+            if (!$stmt) {
+                throw new Exception("Prepare failed: " . $conn->error);
+            }
+            
+            $stmt->bind_param("idss", $reservation_id, $amount_paid, $payment_method, $transaction_id);
+            $stmt->execute();
+            $stmt->close();
+            
+            $stmt = $conn->prepare("CALL sp_update_reservation_status(?, ?)");
+            
+            if (!$stmt) {
+                throw new Exception("Prepare failed: " . $conn->error);
+            }
+            $new_status = 'pending_approval';
+            $stmt->bind_param("is", $reservation_id, $new_status);
+            $stmt->execute();
+            $stmt->close();
+            
+            $conn->commit();
+            
+            header('Location: dashboard.php?payment_success=1');
+            exit();
+        } catch (Exception $e) {
+            $conn->rollback();
+            $error = 'Payment processing failed. Please try again. Error: ' . $e->getMessage();
         }
-        
-        $stmt->bind_param("idss", $reservation_id, $amount, $payment_method, $transaction_id);
-        $stmt->execute();
-        $stmt->close();
-        
-        $stmt = $conn->prepare("CALL sp_update_reservation_status(?, ?)");
-        
-        if (!$stmt) {
-            throw new Exception("Prepare failed: " . $conn->error);
-        }
-        $new_status = 'confirmed';
-        $stmt->bind_param("is", $reservation_id, $new_status);
-        $stmt->execute();
-        $stmt->close();
-        
-        $conn->commit();
-        
-        $show_receipt = true;
-        $payment_data = [
-            'transaction_id' => $transaction_id,
-            'payment_method' => $payment_method,
-            'amount' => $amount,
-            'payment_date' => date('M d, Y h:i A')
-        ];
-    } catch (Exception $e) {
-        $conn->rollback();
-        $error = 'Payment processing failed. Please try again. Error: ' . $e->getMessage();
     }
 }
-
-$stmt = $conn->prepare("CALL sp_get_user_details(?)");
-
-if (!$stmt) {
-    die("Prepare failed: " . $conn->error);
-}
-
-$stmt->bind_param("i", $_SESSION['user_id']);
-$stmt->execute();
-$user_result = $stmt->get_result();
-$user_data = $user_result->fetch_assoc();
-$stmt->close();
 
 $db->close();
 
@@ -101,30 +89,7 @@ $nights = (strtotime($reservation['check_out_date']) - strtotime($reservation['c
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/payment.css">
-    <style>
-        @media print {
-            .container {
-                display: none !important;
-            }
-            
-            #receiptModal {
-                display: block !important;
-                position: static !important;
-                background: white !important;
-            }
-            
-            .modal-content {
-                box-shadow: none !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                max-width: 100% !important;
-            }
-            
-            .modal-actions {
-                display: none !important;
-            }
-        }
-    </style>
+  
 </head>
 <body>
     <div class="container">
@@ -173,7 +138,7 @@ $nights = (strtotime($reservation['check_out_date']) - strtotime($reservation['c
             </div>
             
             <?php if($reservation['status'] === 'pending'): ?>
-            <form method="POST">
+            <form method="POST" id="paymentForm">
                 <div class="form-group">
                     <label>Select Payment Method</label>
                     <div class="payment-methods">
@@ -196,7 +161,7 @@ $nights = (strtotime($reservation['check_out_date']) - strtotime($reservation['c
                     </div>
                 </div>
                 
-                <button type="submit" class="btn">Process Payment</button>
+                <button type="button" class="btn" onclick="openPaymentModal()">Process Payment</button>
             </form>
             <?php else: ?>
             <div class="success">This reservation has already been paid.</div>
@@ -208,113 +173,138 @@ $nights = (strtotime($reservation['check_out_date']) - strtotime($reservation['c
         </div>
     </div>
 
-    <?php if($show_receipt && $payment_data): ?>
-    <div id="receiptModal" class="modal show">
+    <div id="paymentModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Payment Receipt</h2>
+                <i class="fas fa-money-bill-wave"></i>
+                <h2>Enter Payment Amount</h2>
             </div>
             <div class="modal-body">
-                <div class="receipt">
-                    <div class="receipt-header">
-                        <h1>HOTEL RESERVATION</h1>
-                        <p>Official Payment Receipt</p>
-                        <p style="margin-top: 10px;"><span class="status-badge">PAID</span></p>
+                <div class="error-message" id="modalError">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <span id="modalErrorText"></span>
+                </div>
+                
+                <div class="payment-summary">
+                    <div class="summary-row">
+                        <span class="summary-label">Reservation #</span>
+                        <span class="summary-value"><?php echo $reservation['reservation_id']; ?></span>
                     </div>
-
-                    <div class="receipt-info">
-                        <div class="info-section">
-                            <h3>Guest Information</h3>
-                            <div class="info-row">
-                                <span class="info-label">Name:</span>
-                                <span class="info-value"><?php echo htmlspecialchars($user_data['full_name']); ?></span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Email:</span>
-                                <span class="info-value"><?php echo htmlspecialchars($user_data['email']); ?></span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Phone:</span>
-                                <span class="info-value"><?php echo htmlspecialchars($user_data['phone']); ?></span>
-                            </div>
-                        </div>
-
-                        <div class="info-section">
-                            <h3>Payment Information</h3>
-                            <div class="info-row">
-                                <span class="info-label">Transaction ID:</span>
-                                <span class="info-value"><?php echo htmlspecialchars($payment_data['transaction_id']); ?></span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Payment Date:</span>
-                                <span class="info-value"><?php echo $payment_data['payment_date']; ?></span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Payment Method:</span>
-                                <span class="info-value"><?php echo ucwords(str_replace('_', ' ', htmlspecialchars($payment_data['payment_method']))); ?></span>
-                            </div>
-                        </div>
+                    <div class="summary-row">
+                        <span class="summary-label">Room</span>
+                        <span class="summary-value"><?php echo htmlspecialchars($reservation['room_number']); ?> - <?php echo htmlspecialchars($reservation['type_name']); ?></span>
                     </div>
-
-                    <table class="receipt-table">
-                        <thead>
-                            <tr>
-                                <th>Description</th>
-                                <th>Details</th>
-                                <th style="text-align: right;">Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>
-                                    <strong>Room Reservation</strong><br>
-                                    <small>Reservation #<?php echo $reservation['reservation_id']; ?></small>
-                                </td>
-                                <td>
-                                    Room <?php echo htmlspecialchars($reservation['room_number']); ?> - <?php echo htmlspecialchars($reservation['type_name']); ?><br>
-                                    <small><?php echo date('M d, Y', strtotime($reservation['check_in_date'])); ?> to <?php echo date('M d, Y', strtotime($reservation['check_out_date'])); ?></small><br>
-                                    <small><?php echo $nights; ?> night(s) × ₱<?php echo number_format($reservation['base_price'], 2); ?></small>
-                                </td>
-                                <td style="text-align: right;">₱<?php echo number_format($reservation['total_amount'], 2); ?></td>
-                            </tr>
-                        </tbody>
-                    </table>
-
-                    <div class="receipt-total">
-                        <div class="total-row">
-                            <span>Subtotal:</span>
-                            <span>₱<?php echo number_format($reservation['total_amount'], 2); ?></span>
-                        </div>
-                        
-                        <div class="total-row grand-total">
-                            <span>Total Paid:</span>
-                            <span>₱<?php echo number_format($payment_data['amount'], 2); ?></span>
-                        </div>
+                    <div class="summary-row">
+                        <span class="summary-label">Payment Method</span>
+                        <span class="summary-value" id="selectedMethodDisplay"></span>
                     </div>
-
-                    <div class="receipt-footer">
-                        <p>Thank you for your payment!</p>
-                        <p>This is an official receipt. Please keep for your records.</p>
-                        <p style="margin-top: 10px;">For inquiries, please contact our front desk.</p>
-                    </div>
-
-                    <div class="modal-actions">
-                        <button onclick="printReceipt()" class="btn-print">🖨️ Print Receipt</button>
-                        <button onclick="closeAndRedirect()" class="btn-close">Close & Go to Dashboard</button>
+                    <div class="summary-row">
+                        <span class="summary-label">Total Amount Due</span>
+                        <span class="summary-value">₱<?php echo number_format($reservation['total_amount'], 2); ?></span>
                     </div>
                 </div>
+                
+                <div class="form-group-modal">
+                    <label><i class="fas fa-peso-sign"></i> Amount Paid</label>
+                    <input type="number" step="0.01" id="modalAmountPaid" placeholder="Enter amount paid" min="<?php echo $reservation['total_amount']; ?>" maxlength="10" oninput="limitDigits(this)">
+                    <small>Minimum: ₱<?php echo number_format($reservation['total_amount'], 2); ?></small>
+                </div>
+                
+                <div class="form-group-modal" id="changeDisplay" style="display: none;">
+                    <label><i class="fas fa-hand-holding-usd"></i> Change</label>
+                    <input type="text" id="changeAmount" readonly style="background: #f1f5f9; font-weight: 700; color: #059669;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-modal btn-cancel" onclick="closePaymentModal()">
+                    <i class="fas fa-times"></i>
+                    Cancel
+                </button>
+                <button type="button" class="btn-modal btn-confirm" onclick="confirmPayment()">
+                    <i class="fas fa-check"></i>
+                    Confirm Payment
+                </button>
             </div>
         </div>
     </div>
-    <?php endif; ?>
 
     <script>
-        function printReceipt() {
-            window.print();
+        const totalAmount = <?php echo $reservation['total_amount']; ?>;
+        
+        function limitDigits(input) {
+            let value = input.value.replace(/[^\d.]/g, '');
+            
+            const parts = value.split('.');
+            if (parts[0].length > 7) {
+                parts[0] = parts[0].substring(0, 7);
+            }
+            
+            if (parts.length > 1) {
+                value = parts[0] + '.' + parts[1].substring(0, 2);
+            } else {
+                value = parts[0];
+            }
+            
+            input.value = value;
         }
-
-        function closeAndRedirect() {
-            window.location.href = 'dashboard.php';
+        
+        function openPaymentModal() {
+            const paymentMethod = document.querySelector('input[name="payment_method"]:checked');
+            
+            if (!paymentMethod) {
+                alert('Please select a payment method first.');
+                return;
+            }
+            
+            const methodText = paymentMethod.value.replace('_', ' ').toUpperCase();
+            document.getElementById('selectedMethodDisplay').textContent = methodText;
+            document.getElementById('paymentModal').classList.add('show');
+            document.getElementById('modalAmountPaid').focus();
+        }
+        
+        function closePaymentModal() {
+            document.getElementById('paymentModal').classList.remove('show');
+            document.getElementById('modalAmountPaid').value = '';
+            document.getElementById('changeDisplay').style.display = 'none';
+            document.getElementById('modalError').classList.remove('show');
+        }
+        
+        document.getElementById('modalAmountPaid').addEventListener('input', function() {
+            const amountPaid = parseFloat(this.value) || 0;
+            
+            if (amountPaid >= totalAmount) {
+                const change = amountPaid - totalAmount;
+                document.getElementById('changeAmount').value = '₱' + change.toFixed(2);
+                document.getElementById('changeDisplay').style.display = 'block';
+                document.getElementById('modalError').classList.remove('show');
+            } else {
+                document.getElementById('changeDisplay').style.display = 'none';
+            }
+        });
+        
+        function confirmPayment() {
+            const amountPaid = parseFloat(document.getElementById('modalAmountPaid').value) || 0;
+            
+            if (amountPaid < totalAmount) {
+                document.getElementById('modalErrorText').textContent = 'Insufficient amount! Please pay at least ₱' + totalAmount.toFixed(2);
+                document.getElementById('modalError').classList.add('show');
+                return;
+            }
+            
+            const form = document.getElementById('paymentForm');
+            const hiddenInput = document.createElement('input');
+            hiddenInput.type = 'hidden';
+            hiddenInput.name = 'amount_paid';
+            hiddenInput.value = amountPaid;
+            form.appendChild(hiddenInput);
+            form.submit();
+        }
+        
+        window.onclick = function(event) {
+            const modal = document.getElementById('paymentModal');
+            if (event.target == modal) {
+                closePaymentModal();
+            }
         }
     </script>
 </body>
