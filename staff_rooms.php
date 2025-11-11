@@ -69,14 +69,14 @@ $db->close();
         }
         
         .pagination a:hover {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
             color: white;
             border-color: #667eea;
             transform: translateY(-2px);
         }
         
         .pagination .current {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
             color: white;
             border-color: #667eea;
         }

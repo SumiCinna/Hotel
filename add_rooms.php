@@ -53,8 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['error'] = "Room type name must not exceed 20 characters!";
         } elseif (strlen($description) > 50) {
             $_SESSION['error'] = "Description must not exceed 50 characters!";
-        } elseif (!preg_match('/^\d{1,6}(\.\d{1,2})?$/', $base_price)) {
-            $_SESSION['error'] = "Base price must be 1-6 digits!";
+        } elseif (!preg_match('/^\d{1,5}(\.\d{1,2})?$/', $base_price)) {
+            $_SESSION['error'] = "Base price must be 1-5 digits!";
         } elseif ($max_occupancy < 1 || $max_occupancy > 99 || !preg_match('/^\d{1,2}$/', $max_occupancy)) {
             $_SESSION['error'] = "Max occupancy must be 1-2 digits!";
         } else {
@@ -106,6 +106,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (isset($_POST['action']) && $_POST['action'] === 'archive_room') {
         $room_id = $_POST['room_id'];
         $is_archived = $_POST['is_archived'];
+        
+        if ($is_archived == 0) {
+            $check_stmt = $conn->prepare("SELECT rt.is_archived FROM rooms r JOIN room_types rt ON r.room_type_id = rt.room_type_id WHERE r.room_id = ?");
+            $check_stmt->bind_param("i", $room_id);
+            $check_stmt->execute();
+            $check_result = $check_stmt->get_result();
+            $check_row = $check_result->fetch_assoc();
+            $check_stmt->close();
+            
+            if ($check_row && $check_row['is_archived'] == 1) {
+                $_SESSION['error'] = "Cannot restore room: Room type is archived!";
+                header("Location: add_rooms.php");
+                exit();
+            }
+        }
         
         $stmt = $conn->prepare("CALL sp_archive_room(?, ?, @result)");
         $stmt->bind_param("ii", $room_id, $is_archived);
@@ -188,6 +203,49 @@ $db->close();
     <title>Add Rooms - Hotel Reservation System</title>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+            padding: 20px 0;
+        }
+        
+        .pagination button {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            color: #333;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+        
+        .pagination button:hover:not(:disabled) {
+            background: #2c3e50;
+            color: white;
+            border-color: #2c3e50;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .pagination button.active {
+            background: #2c3e50;
+            color: white;
+            border-color: #2c3e50;
+        }
+        
+        .pagination .page-info {
+            font-weight: 500;
+            color: #333;
+        }
+    </style>
 </head>
 <body>
     <div class="sidebar">
@@ -214,7 +272,7 @@ $db->close();
             <a href="staff_rooms.php" class="menu-item">
                 <i class="fas fa-door-open"></i>
                 <span>Rooms</span>
-                </a>
+            </a>
             <a href="add_rooms.php" class="menu-item">
                 <i class="fas fa-plus"></i>
                 <span>Manage Rooms</span>
@@ -236,11 +294,11 @@ $db->close();
     <div class="main-content">
         <div class="top-bar">
             <div class="top-bar-left">
-                <h1 class="playfair">Add Room</h1>
+                <h1 class="playfair">Manage Rooms</h1>
                 <div class="breadcrumb">
                     <span>Home</span>
                     <i class="fas fa-chevron-right"></i>
-                    <span>Add Room</span>
+                    <span>Manage Rooms</span>
                 </div>
             </div>
             <div class="top-bar-right">
@@ -265,9 +323,91 @@ $db->close();
                 <span><?php echo $_SESSION['error']; unset($_SESSION['error']); ?></span>
             </div>
             <?php endif; ?>
+
+            <div class="action-buttons">
+                <button class="btn-add" onclick="openModal('addRoomModal')">
+                    <i class="fas fa-door-open"></i>
+                    Add New Room
+                </button>
+                <button class="btn-add" onclick="openModal('addRoomTypeModal')">
+                    <i class="fas fa-layer-group"></i>
+                    Add New Room Type
+                </button>
+            </div>
             
-            <div class="form-section">
+            <div class="section">
+                <div class="section-header">
+                    <h3 class="playfair"><i class="fas fa-door-open"></i> All Rooms</h3>
+                    <div class="toggle-switch-container">
+                        <span id="toggleLabel">Active</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="archiveToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div id="roomsContainer">
+                    <div class="table-container">
+                        <table id="roomsTable">
+                            <thead>
+                                <tr>
+                                    <th><i class="fas fa-door-closed"></i> Room Number</th>
+                                    <th><i class="fas fa-bed"></i> Type</th>
+                                    <th><i class="fas fa-building"></i> Floor</th>
+                                    <th><i class="fas fa-toggle-on"></i> Status</th>
+                                    <th><i class="fas fa-cog"></i> Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="roomsBody">
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="pagination" id="roomsPagination"></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <h3 class="playfair"><i class="fas fa-layer-group"></i> Room Types</h3>
+                    <div class="toggle-switch-container">
+                        <span id="toggleLabelTypes">Active</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="archiveToggleTypes">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="roomTypesContainer">
+                    <div class="table-container">
+                        <table id="roomTypesTable">
+                            <thead>
+                                <tr>
+                                    <th><i class="fas fa-bed"></i> Room Type</th>
+                                    <th><i class="fas fa-users"></i> Max Occupancy</th>
+                                    <th><i class="fas fa-dollar-sign"></i> Base Price</th>
+                                    <th><i class="fas fa-info-circle"></i> Description</th>
+                                    <th><i class="fas fa-cog"></i> Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="roomTypesBody">
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="pagination" id="roomTypesPagination"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="addRoomModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
                 <h3 class="playfair"><i class="fas fa-plus-circle"></i> Add New Room</h3>
+                <span class="close" onclick="closeModal('addRoomModal')">&times;</span>
+            </div>
+            <div class="modal-body">
                 <form method="POST" action="add_rooms.php">
                     <input type="hidden" name="action" value="add">
                     <div class="form-row">
@@ -300,9 +440,16 @@ $db->close();
                     </button>
                 </form>
             </div>
+        </div>
+    </div>
 
-            <div class="form-section">
+    <div id="addRoomTypeModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
                 <h3 class="playfair"><i class="fas fa-plus-circle"></i> Add New Room Type</h3>
+                <span class="close" onclick="closeModal('addRoomTypeModal')">&times;</span>
+            </div>
+            <div class="modal-body">
                 <form method="POST" action="add_rooms.php" enctype="multipart/form-data">
                     <input type="hidden" name="action" value="add_room_type">
                     <div class="form-row">
@@ -312,13 +459,13 @@ $db->close();
                         </div>
                         <div class="form-group">
                             <label for="max_occupancy">Max Occupancy</label>
-                            <input type="number" id="max_occupancy" name="max_occupancy" placeholder="e.g., 2" min="1" max="99" required>
+                            <input type="number" id="max_occupancy" name="max_occupancy" placeholder="e.g., 2" min="1" max="99" required oninput="if(this.value.length > 2) this.value = this.value.slice(0, 2);">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="base_price">Base Price</label>
-                            <input type="number" id="base_price" name="base_price" placeholder="e.g., 2500.00" step="0.01" min="0" max="999999.99" required>
+                            <input type="number" id="base_price" name="base_price" placeholder="e.g., 2500.00" step="0.01" min="0" max="99999.99" required oninput="if(this.value.length > 8) this.value = this.value.slice(0, 8);">
                         </div>
                         <div class="form-group">
                             <label for="description">Description</label>
@@ -335,68 +482,6 @@ $db->close();
                     </button>
                 </form>
             </div>
-            
-            <div class="section">
-                <div class="section-header">
-                    <h3 class="playfair"><i class="fas fa-door-open"></i> All Rooms</h3>
-                    <div class="toggle-switch-container">
-                        <span id="toggleLabel">Active</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="archiveToggle">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div id="roomsContainer">
-                    <div class="table-container">
-                        <table id="roomsTable">
-                            <thead>
-                                <tr>
-                                    <th><i class="fas fa-door-closed"></i> Room Number</th>
-                                    <th><i class="fas fa-bed"></i> Type</th>
-                                    <th><i class="fas fa-building"></i> Floor</th>
-                                    <th><i class="fas fa-toggle-on"></i> Status</th>
-                                    <th><i class="fas fa-cog"></i> Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="roomsBody">
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <div class="section">
-                <div class="section-header">
-                    <h3 class="playfair"><i class="fas fa-layer-group"></i> Room Types</h3>
-                    <div class="toggle-switch-container">
-                        <span id="toggleLabelTypes">Active</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="archiveToggleTypes">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <div id="roomTypesContainer">
-                    <div class="table-container">
-                        <table id="roomTypesTable">
-                            <thead>
-                                <tr>
-                                    <th><i class="fas fa-bed"></i> Room Type</th>
-                                    <th><i class="fas fa-users"></i> Max Occupancy</th>
-                                    <th><i class="fas fa-dollar-sign"></i> Base Price</th>
-                                    <th><i class="fas fa-info-circle"></i> Description</th>
-                                    <th><i class="fas fa-cog"></i> Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="roomTypesBody">
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -408,10 +493,29 @@ $db->close();
         const toggleLabelTypes = document.getElementById('toggleLabelTypes');
         const roomTypesBody = document.getElementById('roomTypesBody');
 
+        let currentRoomsPage = 1;
+        let currentRoomTypesPage = 1;
+        const roomsPerPage = 10;
+        const roomTypesPerPage = 5;
+
+        function openModal(modalId) {
+            document.getElementById(modalId).style.display = 'block';
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+
         let allActiveRooms = <?php 
             $db = new Database();
             $conn = $db->getConnection();
-            $active_result = $conn->query("SELECT room_id, room_number, type_name, floor, status FROM vw_active_rooms");
+            $active_result = $conn->query("SELECT r.room_id, r.room_number, rt.type_name, r.floor, r.status, rt.is_archived as room_type_archived FROM vw_active_rooms r JOIN rooms rm ON r.room_id = rm.room_id JOIN room_types rt ON rm.room_type_id = rt.room_type_id");
             $active_data = [];
             while ($row = $active_result->fetch_assoc()) {
                 $active_data[] = $row;
@@ -420,7 +524,7 @@ $db->close();
         ?>;
         
         let allArchivedRooms = <?php 
-            $archived_result = $conn->query("SELECT room_id, room_number, type_name, floor, status FROM vw_archived_rooms");
+            $archived_result = $conn->query("SELECT r.room_id, r.room_number, rt.type_name, r.floor, r.status, rt.is_archived as room_type_archived FROM vw_archived_rooms r JOIN rooms rm ON r.room_id = rm.room_id JOIN room_types rt ON rm.room_type_id = rt.room_type_id");
             $archived_data = [];
             while ($row = $archived_result->fetch_assoc()) {
                 $archived_data[] = $row;
@@ -448,12 +552,76 @@ $db->close();
         ?>;
 
         archiveToggle.addEventListener('change', function() {
+            currentRoomsPage = 1;
             renderRoomsTable(this.checked);
         });
 
         archiveToggleTypes.addEventListener('change', function() {
+            currentRoomTypesPage = 1;
             renderRoomTypesTable(this.checked);
         });
+
+        function renderRoomsPagination(totalRooms, showArchived) {
+            const totalPages = Math.ceil(totalRooms / roomsPerPage);
+            const paginationContainer = document.getElementById('roomsPagination');
+            
+            if (totalPages <= 1) {
+                paginationContainer.innerHTML = '';
+                return;
+            }
+            
+            let html = '';
+            
+            html += `<button onclick="changeRoomsPage(${currentRoomsPage - 1}, ${showArchived})" ${currentRoomsPage === 1 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i></button>`;
+            
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= currentRoomsPage - 1 && i <= currentRoomsPage + 1)) {
+                    html += `<button onclick="changeRoomsPage(${i}, ${showArchived})" ${i === currentRoomsPage ? 'class="active"' : ''}>${i}</button>`;
+                } else if (i === currentRoomsPage - 2 || i === currentRoomsPage + 2) {
+                    html += `<span>...</span>`;
+                }
+            }
+            
+            html += `<button onclick="changeRoomsPage(${currentRoomsPage + 1}, ${showArchived})" ${currentRoomsPage === totalPages ? 'disabled' : ''}><i class="fas fa-chevron-right"></i></button>`;
+            
+            paginationContainer.innerHTML = html;
+        }
+
+        function renderRoomTypesPagination(totalRoomTypes, showArchived) {
+            const totalPages = Math.ceil(totalRoomTypes / roomTypesPerPage);
+            const paginationContainer = document.getElementById('roomTypesPagination');
+            
+            if (totalPages <= 1) {
+                paginationContainer.innerHTML = '';
+                return;
+            }
+            
+            let html = '';
+            
+            html += `<button onclick="changeRoomTypesPage(${currentRoomTypesPage - 1}, ${showArchived})" ${currentRoomTypesPage === 1 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i></button>`;
+            
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= currentRoomTypesPage - 1 && i <= currentRoomTypesPage + 1)) {
+                    html += `<button onclick="changeRoomTypesPage(${i}, ${showArchived})" ${i === currentRoomTypesPage ? 'class="active"' : ''}>${i}</button>`;
+                } else if (i === currentRoomTypesPage - 2 || i === currentRoomTypesPage + 2) {
+                    html += `<span>...</span>`;
+                }
+            }
+            
+            html += `<button onclick="changeRoomTypesPage(${currentRoomTypesPage + 1}, ${showArchived})" ${currentRoomTypesPage === totalPages ? 'disabled' : ''}><i class="fas fa-chevron-right"></i></button>`;
+            
+            paginationContainer.innerHTML = html;
+        }
+
+        function changeRoomsPage(page, showArchived) {
+            currentRoomsPage = page;
+            renderRoomsTable(showArchived);
+        }
+
+        function changeRoomTypesPage(page, showArchived) {
+            currentRoomTypesPage = page;
+            renderRoomTypesTable(showArchived);
+        }
 
         function renderRoomsTable(showArchived) {
             const rooms = showArchived ? allArchivedRooms : allActiveRooms;
@@ -461,15 +629,24 @@ $db->close();
             
             if (rooms.length === 0) {
                 roomsBody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 40px;"><i class="fas fa-door-closed" style="font-size: 48px; color: #ddd; margin-bottom: 10px; display: block;"></i>' + (showArchived ? 'No archived rooms' : 'No active rooms') + '</td></tr>';
+                document.getElementById('roomsPagination').innerHTML = '';
                 return;
             }
 
+            const startIndex = (currentRoomsPage - 1) * roomsPerPage;
+            const endIndex = startIndex + roomsPerPage;
+            const paginatedRooms = rooms.slice(startIndex, endIndex);
+
             let html = '';
-            rooms.forEach(room => {
+            paginatedRooms.forEach(room => {
                 let actionBtn = '';
                 
                 if (showArchived) {
-                    actionBtn = `<form method="POST" action="add_rooms.php" style="display: inline;"><input type="hidden" name="action" value="archive_room"><input type="hidden" name="room_id" value="${room.room_id}"><input type="hidden" name="is_archived" value="0"><button type="submit" class="restore-btn"><i class="fas fa-undo"></i> Restore</button></form>`;
+                    if (room.room_type_archived == 1) {
+                        actionBtn = `<button type="button"class="restore-btn" disabled title="Room type is archived" style="opacity: 0.5; cursor: not-allowed;"><i class="fas fa-exclamation-triangle"></i> Room Type Archived</button>`;
+                    } else {
+                        actionBtn = `<form method="POST" action="add_rooms.php" style="display: inline;"><input type="hidden" name="action" value="archive_room"><input type="hidden" name="room_id" value="${room.room_id}"><input type="hidden" name="is_archived" value="0"><button type="submit" class="restore-btn"><i class="fas fa-undo"></i> Restore</button></form>`;
+                    }
                 } else {
                     if (room.status === 'maintenance') {
                         actionBtn = `<form method="POST" action="add_rooms.php" style="display: inline; margin-right: 5px;"><input type="hidden" name="action" value="maintenance"><input type="hidden" name="room_id" value="${room.room_id}"><input type="hidden" name="maintenance_status" value="available"><button type="submit" class="status-btn status-btn-available"><i class="fas fa-check"></i> Set Available</button></form>`;
@@ -492,6 +669,7 @@ $db->close();
             });
 
             roomsBody.innerHTML = html;
+            renderRoomsPagination(rooms.length, showArchived);
         }
 
         function renderRoomTypesTable(showArchived) {
@@ -500,11 +678,16 @@ $db->close();
             
             if (roomTypes.length === 0) {
                 roomTypesBody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 40px;"><i class="fas fa-box" style="font-size: 48px; color: #ddd; margin-bottom: 10px; display: block;"></i>' + (showArchived ? 'No archived room types' : 'No active room types') + '</td></tr>';
+                document.getElementById('roomTypesPagination').innerHTML = '';
                 return;
             }
 
+            const startIndex = (currentRoomTypesPage - 1) * roomTypesPerPage;
+            const endIndex = startIndex + roomTypesPerPage;
+            const paginatedRoomTypes = roomTypes.slice(startIndex, endIndex);
+
             let html = '';
-            roomTypes.forEach(type => {
+            paginatedRoomTypes.forEach(type => {
                 const price = parseFloat(type.base_price).toFixed(2);
                 const pluralText = type.max_occupancy > 1 ? 's' : '';
                 
@@ -525,6 +708,7 @@ $db->close();
             });
 
             roomTypesBody.innerHTML = html;
+            renderRoomTypesPagination(roomTypes.length, showArchived);
         }
 
         renderRoomsTable(false);
